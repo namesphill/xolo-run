@@ -2,6 +2,9 @@
 // One SkinnedMesh (4 material groups => 4 draw calls) driven by a bone rig with
 // analytic 2-bone leg IK, damped springs for ears / tail / squash / lean, and a
 // procedural gallop. Faces -Z, feet at y=0 of root.
+// Optional hook: xolo.onFootfall = (worldPos, foot, info) => {} fires when a paw plants
+// during the run gait (foot: 'FL'|'FR'|'HL'|'HR', worldPos.y = root world y) and for all
+// four paws on onLand (info = { landing: true, strength }).
 import * as THREE from 'three';
 import { mergeVertices, mergeGeometries } from 'three/addons/BufferGeometryUtils.js';
 
@@ -14,13 +17,13 @@ const smooth = (t) => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
 export const XOLO_DEFAULTS = {
   skinColor: '#1c1c21',
   roughness: 0.26,
-  clearcoat: 0.8,
+  clearcoat: 0.9,
   clearcoatRoughness: 0.2,
-  envMapIntensity: 1.0,
+  envMapIntensity: 1.3,
   innerEarColor: '#f7aeb6',
   rimColor: '#ff9a4d',   // warm fresnel rim so the black silhouette separates from the path
-  rimStrength: 0.26,
-  rimPower: 3.4,
+  rimStrength: 0.42,
+  rimPower: 3.0,
   eyeColor: '#ffa514',
   earScale: 1,
   headScale: 1,
@@ -45,8 +48,26 @@ class Spring {
 
 // ---------------------------------------------------------------- geometry helpers
 // Loft of elliptical sections along +Z. sec: {z, w, h, x?, y?, k? (keel: narrow bottom)}
-function loft(secs, seg = 14) {
+function loft(secs, seg = 14, sub = 1) {
   secs = secs.slice().sort((a, b) => a.z - b.z);
+  if (sub > 1) {
+    const cr = (p0, p1, p2, p3, t) => 0.5 * (2 * p1 + (p2 - p0) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + (3 * p1 - p0 - 3 * p2 + p3) * t * t * t);
+    const keys = ['z', 'w', 'h', 'x', 'y', 'k'], out = [];
+    for (let i = 0; i < secs.length - 1; i++) {
+      const a = secs[Math.max(0, i - 1)], b = secs[i], c = secs[i + 1], d = secs[Math.min(secs.length - 1, i + 2)];
+      out.push(b);
+      // keep end caps tight: don't subdivide the first/last (cap) spans
+      if (i === 0 || i === secs.length - 2) continue;
+      for (let k = 1; k < sub; k++) {
+        const t = k / sub, o = {};
+        for (const key of keys) o[key] = cr(a[key] || 0, b[key] || 0, c[key] || 0, d[key] || 0, t);
+        o.w = Math.max(o.w, 0.002); o.h = Math.max(o.h, 0.002); o.k = clamp(o.k, 0, 1);
+        out.push(o);
+      }
+    }
+    out.push(secs[secs.length - 1]);
+    secs = out;
+  }
   const pos = [], idx = [], n = secs.length;
   for (const s of secs) {
     for (let j = 0; j < seg; j++) {
@@ -93,7 +114,7 @@ function limb(len, r0, r1, sx = 1, seg = 10) {
 }
 
 function ellipsoid(rx, ry, rz, ws = 12, hs = 8) {
-  const g = new THREE.SphereGeometry(1, ws, hs);
+  const g = new THREE.SphereGeometry(1, Math.round(ws * 1.35), Math.round(hs * 1.35));
   g.deleteAttribute('uv');
   g.scale(rx, ry, rz);
   return g;
@@ -101,7 +122,7 @@ function ellipsoid(rx, ry, rz, ws = 12, hs = 8) {
 
 // Large bat ear: cupped shell opening toward -Z, base at origin, extends +Y.
 function earGeos(H, W, cup, thick) {
-  const NU = 10, NV = 9;
+  const NU = 14, NV = 12;
   const wAt = (u) => W * Math.pow(Math.max(0, Math.sin(Math.PI * (0.16 + 0.84 * u))), 0.6);
   const front = (u, v) => [
     wAt(u) * v,
@@ -139,7 +160,7 @@ function earGeos(H, W, cup, thick) {
 
 // Cempasúchil pom-pom: ruffled, slightly flattened along +Z (its face).
 function marigold(r, hex) {
-  let g = new THREE.IcosahedronGeometry(1, 2);
+  let g = new THREE.IcosahedronGeometry(1, 3);
   g.deleteAttribute('uv'); g.deleteAttribute('normal');
   g = mergeVertices(g);
   const p = g.attributes.position, col = new Float32Array(p.count * 3);
@@ -299,7 +320,7 @@ export function createXolo(params = {}) {
       const b = new THREE.Bone(); b.name = name; b.position.set(x, y, z); b.rotation.order = order;
       if (parent) parent.add(b); bones.push(b); return b;
     };
-    const base = mk('base', null);
+    const base = mk('base', null, 0, 0, 0, 'YXZ');
     const body = mk('body', base, 0, L.bodyY, 0, 'YXZ');
     const chest = mk('chest', body, ...L.chest);
     const chestShape = mk('chestShape', chest);
@@ -322,6 +343,7 @@ export function createXolo(params = {}) {
       legs.push({
         front, side, parent, upper, mid, foot, paw, L: Ls, kneeFwd: !front,
         joint: new THREE.Vector3(side * j[0], L.bodyY + po[1] + j[1], po[2] + j[2]),
+        name: (front ? 'F' : 'H') + (side < 0 ? 'L' : 'R'),
         restDz: front ? 0.02 : 0.045, psiRest: front ? 0.12 : 0.3,
         phaseOff: front ? (side < 0 ? 0.45 : 0.55) : (side < 0 ? 0.0 : 0.1),
       });
@@ -341,21 +363,21 @@ export function createXolo(params = {}) {
     const add = (geo, bone, group, color = 1, skinFn = null) => pieces.push({ geo, bone, group, color, skinFn });
     const shift = (secs, o) => secs.map((s) => ({ ...s, z: s.z - o[2], y: (s.y || 0) - o[1] }));
     const vol = (secs, fw, fh) => secs.map((q) => (q.w > 0.03 ? { ...q, w: q.w * fw, h: q.h * fh } : q));
-    add(loft(shift(vol(CHEST, 1.08, 1.06), L.chest), 18), chestShape, 0);
-    add(loft(shift(vol(HIP, 1.12, 1.07), L.hips), 18), hipShape, 0);
+    add(loft(shift(vol(CHEST, 1.08, 1.06), L.chest), 26, 3), chestShape, 0);
+    add(loft(shift(vol(HIP, 1.12, 1.07), L.hips), 26, 3), hipShape, 0);
 
     // neck
     const neckG = loft([
       { z: -0.05, w: 0.055, h: 0.06 }, { z: 0.0, w: 0.064, h: 0.074 }, { z: 0.1, w: 0.058, h: 0.066 },
       { z: L.neckLen, w: 0.052, h: 0.058 }, { z: L.neckLen + 0.035, w: 0.03, h: 0.03 },
-    ], 12);
+    ], 18, 2);
     neckG.rotateX(-(Math.PI / 2 + L.neckTilt));
     add(neckG, neck, 0);
 
     // head
     const hs = (g) => { g.scale(HS, HS, HS); return g; };
-    add(hs(loft(HEAD, 16)), head, 0);
-    add(hs(loft(JAW, 12)), jaw, 0);
+    add(hs(loft(HEAD, 24, 2)), head, 0);
+    add(hs(loft(JAW, 16, 2)), jaw, 0);
     const tongue = ellipsoid(0.023, 0.006, 0.05, 10, 6); tongue.rotateX(0.18); tongue.translate(0, 0.0, -0.17);
     add(hs(tongue), jaw, 1, [1, 0.72, 0.78]);
     const nose = ellipsoid(0.022, 0.016, 0.017, 10, 8); nose.translate(0, 0.014, -0.272);
@@ -364,7 +386,7 @@ export function createXolo(params = {}) {
     for (const s of [-1, 1]) {
       const brow = ellipsoid(0.026, 0.011, 0.02, 10, 6); brow.rotateZ(-s * 0.35); brow.translate(s * 0.045, 0.087, -0.085);
       add(hs(brow), head, 0);
-      const eye = new THREE.SphereGeometry(0.021, 16, 12); eye.deleteAttribute('uv');
+      const eye = new THREE.SphereGeometry(0.021, 20, 16); eye.deleteAttribute('uv');
       const pd = new THREE.Vector3(s * 0.55, 0.12, -1).normalize(), n = new THREE.Vector3();
       const ep = eye.attributes.position, ec = new Float32Array(ep.count * 3);
       for (let i = 0; i < ep.count; i++) {
@@ -414,7 +436,7 @@ export function createXolo(params = {}) {
         m4.compose(c0.clone().addScaledVector(n2, R * 0.95), q, one);
         leaf.applyMatrix4(m4); flowers.push(leaf);
       }
-      const rib = new THREE.TorusGeometry(R * 0.86, 0.017, 6, 28); rib.deleteAttribute('uv');
+      const rib = new THREE.TorusGeometry(R * 0.86, 0.017, 8, 36); rib.deleteAttribute('uv');
       const rc = new THREE.Color('#e8177d');
       rib.setAttribute('color', new THREE.Float32BufferAttribute(new Array(rib.attributes.position.count).fill(0).flatMap(() => [rc.r, rc.g, rc.b]), 3));
       q.setFromUnitVectors(Z, nd); rib.applyQuaternion(q); rib.translate(c0.x, c0.y, c0.z);
@@ -442,13 +464,13 @@ export function createXolo(params = {}) {
         const t = 0.2 + (i / 3) * (Math.PI / 2 - 0.2), r = r0 * Math.sin(t);
         secs.push({ z: -r0 * Math.cos(t), w: r * prof[0][2], h: r, y: prof[0][3] });
       }
-      const NS = 22;
+      const NS = 30;
       for (let i = 1; i <= NS; i++) {
         const d = (i / NS) * J3, [r, sx, off] = at(d);
         secs.push({ z: d, w: r * sx, h: r, y: off });
       }
       secs.push({ z: J3 + 0.012, w: 0.008, h: 0.008 });
-      const tube = loft(secs, 12); tube.rotateX(Math.PI / 2);
+      const tube = loft(secs, 16); tube.rotateX(Math.PI / 2);
       const bi = [leg.upper, leg.mid, leg.foot, leg.paw].map((b) => bones.indexOf(b));
       const joints = [[J1, 0.04], [J2, 0.03], [J3, 0.018]];
       add(tube, leg.upper, 0, 1, (p) => {
@@ -466,15 +488,15 @@ export function createXolo(params = {}) {
 
     // tail: one smooth tube blended between consecutive bones
     const tLen = L.tailSeg * (L.tailN - 1), tSecs = [];
-    for (let i = 0; i <= 14; i++) {
-      const s = (i / 14) * (tLen + 0.02);
+    for (let i = 0; i <= 20; i++) {
+      const s = (i / 20) * (tLen + 0.02);
       const r = lerp(0.03, 0.007, Math.pow(s / tLen, 0.8));
       tSecs.push({ z: s, w: r, h: r });
     }
     tSecs[0] = { z: -0.03, w: 0.012, h: 0.012 };
     tSecs.push({ z: tLen + 0.03, w: 0.003, h: 0.003 });
     const t0 = bones.indexOf(tail[0]);
-    add(loft(tSecs, 8), tail[0], 0, 1, (p) => {
+    add(loft(tSecs, 12), tail[0], 0, 1, (p) => {
       const f = clamp(p.z / L.tailSeg, 0, L.tailN - 1 - 1e-4), i = Math.floor(f), w = f - i;
       return [t0 + i, t0 + i + 1, 1 - w, w];
     });
@@ -540,7 +562,7 @@ export function createXolo(params = {}) {
     makeSprings();
     Object.assign(st, {
       t: 0, phase: 0, runB: 0, airB: 0, speedS: 0, prevV: 0, prevLat: 0, aY: 0, aX: 0,
-      deathCause: null, deathT: 0, deathSide: 1, stumbleT: 0, stumbleDir: 0, earPin: 0,
+      deathCause: null, deathT: 0, spin: 0, swirl: 0, deathSide: 1, stumbleT: 0, stumbleDir: 0, earPin: 0,
       lookT: 1.5, lookYaw: 0, lookPitch: 0, lookYawS: 0, lookPitchS: 0, twitchT: 1, prevBob: 0,
     });
     stars.visible = false;
@@ -569,7 +591,16 @@ export function createXolo(params = {}) {
     leg.paw.rotation.x = pawBase - parentPitch - psi;
   }
 
-  const _F = new THREE.Vector3(), _hw = new THREE.Vector3();
+  const _F = new THREE.Vector3(), _hw = new THREE.Vector3(), _gw = new THREE.Vector3();
+  const footfalls = [];
+  // world position of a paw projected onto the ground plane under the root (y = root world y)
+  function emitFoot(leg, info) {
+    const p = new THREE.Vector3();
+    leg.paw.getWorldPosition(p);
+    root.getWorldPosition(_gw);
+    p.y = _gw.y;
+    xolo.onFootfall(p, leg.name, info);
+  }
   // ---------------------------------------------------- update
   function update(dt, s = {}) {
     if (!rig) return;
@@ -644,7 +675,7 @@ export function createXolo(params = {}) {
       sp.lean.step(h, leanT); sp.yaw.step(h, yawT); sp.side.step(h, 0); sp.squash.step(h, 0);
       sp.ears.forEach((e, i) => {
         const side = i ? 1 : -1;
-        const fl = flail ? Math.sin(t * 22 + i * 2) * 120 : 0;
+        const fl = flail ? Math.sin(t * 22 + i * 2) * 120 + st.swirl * 9 : 0;
         e.p.step(h, earPitchT, st.aY * 0.35 + fl * 0.5);
         e.r.step(h, dead && !flail ? 0.5 : 0, st.aY * 0.9 - side * st.aX * 0.5 + fl);
       });
@@ -654,7 +685,7 @@ export function createXolo(params = {}) {
         const wave = Math.sin(ph - i * 0.9) * 0.12 * runB;
         const wagY = wag * Math.sin(t * TAU * 2.3 - i * 0.55) * (0.25 + 0.1 * i);
         const runY = Math.sin(ph * 0.5 - i * 0.7) * 0.07 * runB;
-        const thr = flail ? Math.sin(t * 14 - i * 0.8) * 0.5 : 0;
+        const thr = flail ? Math.sin(t * 14 - i * 0.8) * 0.5 + st.deathSide * clamp(st.swirl * 0.06, 0, 0.9) : 0;
         ts.x.step(h, (i === 0 ? -tailUp : -0.11 + (dead && !flail ? 0.12 : 0)) + wave, st.aY * gain * 0.9);
         ts.y.step(h, wagY + runY + thr, st.aX * gain * 0.5);
       });
@@ -678,11 +709,17 @@ export function createXolo(params = {}) {
       deadLimp = k2; dizzy = smooth((dT - 0.6) / 0.4);
       jawOpen = 0.32;
     } else if (st.deathCause === 'splash') {
+      // sucked into a whirlpool: accelerating spin, spiralling in, tilted outward, flailing
       const dT = (st.deathT += dt), k = smooth(dT / 0.35);
-      base.rotation.x = 0.5 * k + Math.sin(t * 9) * 0.06;
-      base.rotation.z = Math.sin(t * 7) * 0.18 * k;
-      base.position.y = Math.sin(t * 11) * 0.03 * k;
-      headUp = 0.5 * k;
+      const w = Math.min(4 + dT * 7, 16);
+      st.spin += w * dt * st.deathSide;
+      const rad = 0.28 * k * Math.exp(-dT * 0.9);
+      base.rotation.y = st.spin;
+      base.rotation.x = (0.42 + Math.sin(t * 9) * 0.08) * k;
+      base.rotation.z = st.deathSide * (0.3 + Math.sin(t * 6.3) * 0.1) * k;
+      base.position.set(Math.cos(st.spin) * rad, Math.sin(t * 11) * 0.03 * k, Math.sin(st.spin) * rad);
+      st.swirl = w * k;
+      headUp = 0.55 * k;
       jawOpen = 0.45 + Math.sin(t * 13) * 0.12;
     }
     stars.visible = dizzy > 0.01;
@@ -731,11 +768,14 @@ export function createXolo(params = {}) {
     _Mh.copy(R.hips.matrixWorld).invert().multiply(base.matrixWorld);
     const dY = bodyY - L.bodyY;
     const Sf = 0.55 * L.LL * runB, Sh = 0.5 * L.LL * runB;
+    footfalls.length = 0;
     for (const leg of R.legs) {
       const j = leg.joint, jy = j.y + dY;
       // ground gait
       const duty = 0.38;
       const q = (st.phase - leg.phaseOff + 1) % 1;
+      if (leg.prevQ !== undefined && q < leg.prevQ - 0.5 && runB > 0.5 && gnd > 0.8 && !dead) footfalls.push(leg);
+      leg.prevQ = q;
       const S = leg.front ? Sf : Sh;
       let gz, gy = 0, psi = leg.psiRest, pawA = 0;
       if (q < duty) {
@@ -778,6 +818,11 @@ export function createXolo(params = {}) {
       solveLeg(leg, _F, psi, pawA, leg.front ? _M : _Mh, pp);
     }
 
+    if (footfalls.length && xolo.onFootfall) {
+      rig.mesh.updateMatrixWorld(true);
+      for (const leg of footfalls) emitFoot(leg);
+    }
+
     if (stars.visible) {
       R.head.getWorldPosition(_hw);
       root.worldToLocal(_hw);
@@ -796,6 +841,10 @@ export function createXolo(params = {}) {
   function onLand(strength = 0.6) {
     const s = clamp(strength, 0, 1);
     sp.squash.v += 2 + 8 * s;
+    if (xolo.onFootfall && rig) {
+      root.updateMatrixWorld(true);
+      for (const leg of rig.legs) emitFoot(leg, { landing: true, strength: s });
+    }
     sp.ears.forEach((e) => { e.r.v += 4 + 10 * s; e.p.v += 2 + 6 * s; });
     sp.tail.forEach((t, i) => { t.x.v += (2 + 8 * s) * (0.6 + 0.2 * i); });
   }
@@ -814,7 +863,7 @@ export function createXolo(params = {}) {
   }
   function onDeath(cause = 'crash') {
     st.deathCause = cause === 'splash' ? 'splash' : 'crash';
-    st.deathT = 0;
+    st.deathT = 0; st.spin = 0; st.swirl = 0;
     st.deathSide = sp.lean.x > 0.02 ? 1 : sp.lean.x < -0.02 ? -1 : (Math.random() < 0.5 ? -1 : 1);
     st.earPin = 1;
     sp.ears.forEach((e) => { e.r.v += 12; e.p.v += 10; });
@@ -836,6 +885,7 @@ export function createXolo(params = {}) {
 
   const xolo = {
     root, params: P, mesh: null, rig: null, materials: mats,
+    onFootfall: null, // optional (worldPos: Vector3, foot: 'FL'|'FR'|'HL'|'HR', info?: {landing, strength}) => {}
     rebuild, reset, update, onJump, onLand, onLane, onStumble, onDeath, setShadow,
     applyMaterials,
     dispose() {

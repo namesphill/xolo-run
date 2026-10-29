@@ -41,11 +41,12 @@ function skyScene() {
   const s = new THREE.Scene();
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false,
-    uniforms: { sun: { value: new THREE.Vector3(-0.4, 0.25, -1).normalize() } },
+    uniforms: { sun: { value: new THREE.Vector3(-0.4, 0.25, -1).normalize() }, canal: { value: 0 } },
     vertexShader: 'varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
-    fragmentShader: `uniform vec3 sun; varying vec3 vD;
+    fragmentShader: `uniform vec3 sun; uniform float canal; varying vec3 vD;
       void main(){ float h = vD.y;
-        vec3 top = vec3(0.28,0.22,0.55), mid = vec3(1.0,0.55,0.32), low = vec3(1.0,0.78,0.5), gnd = vec3(0.35,0.22,0.15);
+        vec3 top = mix(vec3(0.28,0.22,0.55), vec3(0.06,0.16,0.62), canal), mid = mix(vec3(1.0,0.55,0.32), vec3(0.2,0.45,0.95), canal),
+             low = mix(vec3(1.0,0.78,0.5), vec3(0.85,0.85,0.75), canal), gnd = mix(vec3(0.35,0.22,0.15), vec3(0.05,0.3,0.25), canal);
         vec3 c = h > 0.0 ? mix(low, mix(mid, top, smoothstep(0.15,0.8,h)), smoothstep(0.0,0.15,h)) : mix(low, gnd, smoothstep(0.0,0.3,-h));
         float sd = max(dot(normalize(vD), sun), 0.0);
         c += vec3(1.0,0.75,0.4) * (pow(sd, 400.0)*6.0 + pow(sd, 12.0)*0.5);
@@ -56,7 +57,8 @@ function skyScene() {
 }
 const sky = skyScene();
 const pmrem = new THREE.PMREMGenerator(renderer);
-scene.environment = pmrem.fromScene(sky, 0.02).texture;
+let envRT = pmrem.fromScene(sky, 0.02);
+scene.environment = envRT.texture;
 scene.background = new THREE.Color('#f0a46e');
 const skyMesh = sky.children[0]; skyMesh.scale.setScalar(1.2); scene.add(skyMesh);
 
@@ -87,10 +89,50 @@ for (const s of [-1, 1]) {
 const water = new THREE.Mesh(new THREE.PlaneGeometry(30, 120), new THREE.MeshPhysicalMaterial({ color: '#1f6f6a', roughness: 0.08, transparent: true, opacity: 0.85 }));
 water.rotation.x = -Math.PI / 2; water.position.set(0, WATER_Y, -40); water.visible = false; scene.add(water);
 
+// canal mode: jade water as the running surface (spirit xolo crossing to Mictlán)
+function waterTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#1f8a72'; g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 140; i++) {
+    const x = Math.random() * 256, y = Math.random() * 256, w = 10 + Math.random() * 40;
+    g.strokeStyle = Math.random() < 0.5 ? 'rgba(160,240,210,0.35)' : 'rgba(10,70,60,0.35)';
+    g.lineWidth = 1 + Math.random() * 2;
+    g.beginPath(); g.moveTo(x, y); g.quadraticCurveTo(x + w / 2, y - 3, x + w, y); g.stroke();
+  }
+  const tx = new THREE.CanvasTexture(c); tx.wrapS = tx.wrapT = THREE.RepeatWrapping; tx.colorSpace = THREE.SRGBColorSpace;
+  return tx;
+}
+const canalTex = waterTexture(); canalTex.repeat.set(4, 120 / TILE);
+const canal = new THREE.Mesh(new THREE.PlaneGeometry(16, 120), new THREE.MeshPhysicalMaterial({ map: canalTex, roughness: 0.12, clearcoat: 0.6, metalness: 0 }));
+canal.rotation.x = -Math.PI / 2; canal.position.set(0, 0, -40); canal.receiveShadow = true; canal.visible = false; scene.add(canal);
+function setCanal(on) {
+  sim.canal = on;
+  skyMesh.material.uniforms.canal.value = on ? 1 : 0;
+  sky.add(skyMesh); envRT.dispose(); envRT = pmrem.fromScene(sky, 0.02); scene.environment = envRT.texture; scene.add(skyMesh);
+  scene.background.set(on ? '#5f8fe0' : '#f0a46e'); scene.fog.color.set(on ? '#9fb8e8' : '#f2a66b');
+  hemi.color.set(on ? '#cfe3ff' : '#ffd9a8'); hemi.groundColor.set(on ? '#1f5a4c' : '#5a3a26');
+  sun.color.set(on ? '#fff0d8' : '#ffc387');
+  ground.visible = !on; canal.visible = on;
+}
+
+// footfall ripples (visualises xolo.onFootfall)
+const RIP_N = 24;
+const ripMat = new THREE.MeshBasicMaterial({ color: '#dffcf0', transparent: true, depthWrite: false, opacity: 0.8 });
+const ripGeo = new THREE.RingGeometry(0.75, 1, 28); ripGeo.rotateX(-Math.PI / 2);
+const ripples = [];
+for (let i = 0; i < RIP_N; i++) { const m = new THREE.Mesh(ripGeo, ripMat.clone()); m.visible = false; m.userData.age = 9; scene.add(m); ripples.push(m); }
+let ripI = 0, footfallCount = 0;
+function spawnRipple(p, size) {
+  const m = ripples[ripI++ % RIP_N];
+  m.position.set(p.x, p.y + 0.004, p.z); m.userData.age = 0; m.userData.size = size; m.visible = true;
+}
+
 // the dog
 const xolo = createXolo();
 xolo.setShadow(true);
 scene.add(xolo.root);
+xolo.onFootfall = (p, foot, info) => { footfallCount++; spawnRipple(p, info && info.landing ? 0.35 + 0.35 * info.strength : 0.16); };
 
 const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.05, 200);
 camera.position.set(1.6, 1.2, -2.2);
@@ -114,20 +156,22 @@ const actions = {
   stumbleRight() { xolo.onStumble(1); },
   land() { xolo.onLand(1); },
   deathCrash() { sim.mode = 'dead'; xolo.onDeath('crash'); },
-  deathSplash() { sim.mode = 'dead'; sim.sinking = true; ground.visible = false; water.visible = true; xolo.onDeath('splash'); },
-  reset() { sim.mode = 'idle'; sim.lane = 1; sim.x = 0; sim.y = 0; sim.vy = 0; sim.grounded = true; sim.sinking = false; ground.visible = true; water.visible = false; xolo.reset(); },
+  deathSplash() { sim.mode = 'dead'; sim.sinking = true; if (!sim.canal) { ground.visible = false; water.visible = true; } xolo.onDeath('splash'); },
+  canalScene() { setCanal(!sim.canal); },
+  reset() { sim.mode = 'idle'; sim.lane = 1; sim.x = 0; sim.y = 0; sim.vy = 0; sim.grounded = true; sim.sinking = false; ground.visible = !sim.canal; water.visible = false; xolo.reset(); },
   gameCamera() { sim.camera = 'game'; controls.enabled = false; },
   orbitCamera() { sim.camera = 'orbit'; controls.enabled = true; controls.target.set(xolo.root.position.x, 0.6, 0); camera.position.set(xolo.root.position.x + 1.6, 1.2, -2.2); },
   backCamera() { sim.camera = 'orbit'; controls.enabled = true; controls.target.set(xolo.root.position.x, 0.6, 0); camera.position.set(xolo.root.position.x + 0.9, 1.5, 2.2); },
 };
-window.xolo = xolo; window.actions = actions; window.sim = sim; window.camera = camera; window.controls = controls;
+window.xolo = xolo;
+window.footfalls = () => footfallCount; window.actions = actions; window.sim = sim; window.camera = camera; window.controls = controls;
 
 const gui = new GUI({ title: 'Xolo' });
 const fa = gui.addFolder('Animation');
 fa.add(sim, 'mode', ['idle', 'run', 'dead']).listen();
 fa.add(sim, 'speed', 0, 30, 0.5);
 fa.add(sim, 'autoplay').name('auto lanes/jumps');
-for (const k of ['idle', 'run', 'jump', 'laneLeft', 'laneRight', 'land', 'stumbleLeft', 'stumbleRight', 'deathCrash', 'deathSplash', 'reset']) fa.add(actions, k);
+for (const k of ['idle', 'run', 'jump', 'laneLeft', 'laneRight', 'land', 'stumbleLeft', 'stumbleRight', 'deathCrash', 'deathSplash', 'reset', 'canalScene']) fa.add(actions, k);
 const fc = gui.addFolder('Camera');
 fc.add(actions, 'gameCamera').name('game camera');
 fc.add(actions, 'orbitCamera').name('orbit (3/4 front)');
@@ -185,6 +229,14 @@ function frame() {
   }
   if (sim.sinking) { sim.y = THREE.MathUtils.damp(sim.y, WATER_Y - 0.7, 1.6, dt); }
   xolo.root.position.set(sim.x, sim.y, 0);
+  if (running) canalTex.offset.y += (sim.speed * dt) / TILE;
+  for (const m of ripples) if (m.visible) {
+    const a = (m.userData.age += dt);
+    if (running) m.position.z += sim.speed * dt;
+    m.scale.setScalar(0.05 + m.userData.size * (0.4 + a * 2.2));
+    m.material.opacity = 0.8 * Math.max(0, 1 - a / 0.6);
+    if (a > 0.6) m.visible = false;
+  }
   if (running) pathTex.offset.y += (sim.speed * dt) / TILE, grassTex.offset.y = pathTex.offset.y * 2;
   xolo.update(dt, { mode: sim.mode, speed: running ? sim.speed : 0, grounded: sim.grounded, vy: sim.vy, lateral: sim.lateral });
 
