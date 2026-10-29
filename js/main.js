@@ -40,7 +40,7 @@ setMaxAnisotropy(Math.min(8, renderer.capabilities.getMaxAnisotropy()));
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 400);
 const world = createWorld(renderer, scene, { quality });
-const xolo = createXolo();
+const xolo = createXolo({ envMapIntensity: 0.65 });
 xolo.setShadow(quality === 'high');
 const XOLO_SCALE = 1.2;
 let stepT = 0, lastFootfall = -9;

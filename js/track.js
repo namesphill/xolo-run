@@ -272,8 +272,12 @@ export class Track {
       const geo = new THREE.PlaneGeometry(x1 - x0, b - a, 1, 1).rotateX(-Math.PI / 2);
       geo.translate(0, 0, 0);
       owned.push(geo);
-      const mat = this.hazardMat.clone();
-      mat.uniforms.uTime = this.hazardTime; mat.uniforms.uSize = { value: new THREE.Vector2(x1 - x0, b - a) }; mat.uniforms.uMode = { value: mode };
+      let mat;
+      if (mode === 0 && this.world.makeWhirlpoolMaterial) mat = this.world.makeWhirlpoolMaterial({ width: x1 - x0, length: b - a, spin: 1 + (sec.id % 2) * -2 });
+      else {
+        mat = this.hazardMat.clone();
+        mat.uniforms.uTime = this.hazardTime; mat.uniforms.uSize = { value: new THREE.Vector2(x1 - x0, b - a) }; mat.uniforms.uMode = { value: mode };
+      }
       owned.push(mat);
       const m = new THREE.Mesh(geo, mat);
       m.position.set((x0 + x1) / 2, 0.012, -(a + b) / 2);

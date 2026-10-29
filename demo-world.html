@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Xolo Run — world.js demo</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: system-ui, sans-serif; }
+  canvas { display: block; }
+  #ui { position: fixed; top: 10px; left: 10px; display: flex; flex-wrap: wrap; gap: 6px; max-width: 92vw; }
+  #ui button { border: 0; border-radius: 8px; padding: 7px 12px; font-weight: 600; background: rgba(20,40,90,.75); color: #fff3d0; cursor: pointer; }
+  #ui button.on { background: #e8177d; color: #fff; }
+  #stats { position: fixed; bottom: 8px; left: 10px; color: #fff; font: 12px monospace; text-shadow: 0 1px 2px #000; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./js/vendor/three.module.js", "three/addons/": "./js/vendor/" } }
+</script>
+</head>
+<body>
+<div id="ui">
+  <button data-burst="confetti">Confetti</button>
+  <button data-burst="dust">Dust</button>
+  <button data-burst="splash">Splash (landing)</button>
+  <button data-burst="sparkle">Sparkle</button>
+  <button id="feet" class="on">Footfalls</button>
+  <button id="run" class="on">Running</button>
+  <button id="quality" class="on">Quality: high</button>
+  <button id="cam">Game cam</button>
+</div>
+<div id="stats"></div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/OrbitControls.js';
+import { createWorld } from './js/world.js';
+import { grassTexture } from './js/textures.js';
+import { speedAt } from './js/config.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 400);
+const world = createWorld(renderer, scene, { quality: 'high', waterY: 0 });
+
+// ---- placeholder canal: water lanes x∈[-3.3,3.3], tall banks with ahuejotes, reeds, colourful houses ----
+// Content repeats every BLOCK metres and the group snaps by BLOCK, so it scrolls seamlessly.
+const BLOCK = 48, REP = 6, LEN = BLOCK * REP;
+const ground = new THREE.Group();
+scene.add(ground);
+const gt = grassTexture().clone(); gt.needsUpdate = true; gt.repeat.set(2, LEN / 4);
+const bankMat = new THREE.MeshStandardMaterial({ map: gt, color: 0x8fd060, roughness: 1 });
+for (const s of [-1, 1]) {
+  const b = new THREE.Mesh(new THREE.BoxGeometry(9, 0.8, LEN), bankMat);
+  b.position.set(s * (3.6 + 4.5), 0.0, -LEN / 2 + BLOCK * 2); b.receiveShadow = true; ground.add(b);
+}
+const rnd = (() => { let x = 7; return () => (x = (x * 16807) % 2147483647) / 2147483647; })();
+const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3(), col = new THREE.Color();
+function instanced(geo, mat, items) {
+  const im = new THREE.InstancedMesh(geo, mat, items.length * REP);
+  let k = 0;
+  for (let r = 0; r < REP; r++) for (const it of items) {
+    q.setFromAxisAngle(v.set(0, 1, 0), it.rot || 0);
+    m4.compose(v.set(it.x, it.y, it.z - r * BLOCK + BLOCK * 2), q, sc.set(...it.s));
+    im.setMatrixAt(k, m4); if (it.c !== undefined) im.setColorAt(k, col.set(it.c)); k++;
+  }
+  im.castShadow = true; im.receiveShadow = true; ground.add(im); return im;
+}
+const trunks = [], crowns = [], reeds = [], houses = [], roofs = [], bushes = [];
+const HOUSE = [0xff2e93, 0x19b5c9, 0xffc21a, 0x2f5fd0, 0xff7a1a, 0x8e3fd6, 0x2fbf6a];
+const GREENS = [0x2f7a32, 0x3d8a2c, 0x26692e, 0x4f9a35];
+for (const s of [-1, 1]) {
+  for (let z = 0; z < BLOCK; z += 3.2 + rnd() * 2.5) {          // ahuejote willows 8-14 m
+    const h = 8 + rnd() * 6, x = s * (4.0 + rnd() * 1.6);
+    trunks.push({ x, y: h * 0.25, z: -z, s: [1, h * 0.5, 1] });
+    crowns.push({ x, y: h * 0.62, z: -z, s: [1 + rnd() * 0.3, h * 0.8, 1 + rnd() * 0.3], c: GREENS[(rnd() * 4) | 0] });
+  }
+  for (let z = 0; z < BLOCK; z += 0.5 + rnd() * 0.7) {          // reeds at the waterline
+    const h = 1.2 + rnd() * 1.2;
+    reeds.push({ x: s * (3.45 + rnd() * 0.4), y: 0.4 + h / 2 - 0.5, z: -z, s: [1, h, 1], rot: rnd() * 6, c: rnd() < 0.5 ? 0x5f9a2a : 0x88a83a });
+  }
+  for (let z = 4; z < BLOCK; z += 9 + rnd() * 6) {               // colourful houses behind the trees
+    const w = 3 + rnd() * 1.5, h = 2.6 + rnd() * 1.8, x = s * (7.5 + rnd() * 2);
+    houses.push({ x, y: 0.4 + h / 2, z: -z, s: [w, h, 3], c: HOUSE[(rnd() * HOUSE.length) | 0] });
+    roofs.push({ x, y: 0.4 + h + 0.6, z: -z, s: [w * 0.75, 1.2, 2.2], rot: Math.PI / 4, c: 0xb8452a });
+  }
+  for (let z = 0; z < BLOCK; z += 1.4 + rnd() * 1.5) bushes.push({ x: s * (3.8 + rnd() * 0.6), y: 0.55, z: -z, s: [1, 0.8, 1], c: rnd() < 0.75 ? 0xff8a00 : 0xe3127f });
+}
+const std = (o) => new THREE.MeshStandardMaterial({ roughness: 0.85, flatShading: true, ...o });
+instanced(new THREE.CylinderGeometry(0.16, 0.26, 1, 6), std({ color: 0x5a4632 }), trunks);
+instanced(new THREE.CylinderGeometry(0.35, 1.0, 1, 7, 2), std({ color: 0xffffff }), crowns);
+instanced(new THREE.ConeGeometry(0.06, 1, 4), std({ color: 0xffffff }), reeds);
+instanced(new THREE.BoxGeometry(1, 1, 1), std({ color: 0xffffff, flatShading: false }), houses);
+instanced(new THREE.ConeGeometry(0.71, 1, 4), std({ color: 0xffffff }), roofs);
+instanced(new THREE.IcosahedronGeometry(0.42, 0), std({ color: 0xffffff }), bushes);
+
+// glossy black "xolo" stand-ins running on the water
+const black = new THREE.MeshPhysicalMaterial({ color: 0x111014, roughness: 0.22, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.12 });
+const player = new THREE.Group();
+const sphere = new THREE.Mesh(new THREE.SphereGeometry(0.55, 48, 32), black); sphere.position.set(-1.0, 0.6, 0);
+const capsule = new THREE.Mesh(new THREE.CapsuleGeometry(0.32, 0.9, 12, 32), black); capsule.rotation.x = Math.PI / 2; capsule.position.set(1.0, 0.5, 0);
+sphere.castShadow = capsule.castShadow = true;
+player.add(sphere, capsule);
+scene.add(player);
+
+// hazards that recycle ahead of the player: whirlpool (jump over) and a plank ford with a water film
+const whirl = new THREE.Mesh(new THREE.PlaneGeometry(6.6, 10), world.makeWhirlpoolMaterial({ width: 6.6, length: 10 }));
+whirl.rotation.x = -Math.PI / 2; whirl.position.set(0, 0.015, -24); scene.add(whirl);
+const ford = new THREE.Group();
+const planks = new THREE.Mesh(new THREE.BoxGeometry(6.6, 0.12, 5), std({ color: 0x8a5a33, flatShading: false }));
+planks.position.y = -0.06; planks.receiveShadow = true;
+const film = new THREE.Mesh(new THREE.PlaneGeometry(6.6, 5), world.makeFordWaterMaterial());
+film.rotation.x = -Math.PI / 2; film.position.y = 0.02;
+ford.add(planks, film); ford.position.z = -50; scene.add(ford);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+camera.position.set(0, 3.4, 6.5);
+controls.target.set(0, 1, -4);
+controls.enableDamping = true;
+
+const focus = new THREE.Vector3();
+let running = true, s = 0, gameCam = false, feet = true, stepT = 0, paw = 0;
+const ui = (id) => document.getElementById(id);
+const tog = (id, get, set, label) => ui(id).onclick = (e) => { set(!get()); e.target.classList.toggle('on', get()); if (label) e.target.textContent = label(get()); };
+tog('run', () => running, (x) => running = x, (x) => x ? 'Running' : 'Paused');
+tog('feet', () => feet, (x) => feet = x);
+tog('cam', () => gameCam, (x) => gameCam = x);
+ui('quality').onclick = (e) => { const q = world.quality === 'high' ? 'low' : 'high'; world.setQuality(q); e.target.textContent = 'Quality: ' + q; e.target.classList.toggle('on', q === 'high'); };
+const runVel = (k) => running ? new THREE.Vector3(0, 0, -speedAt(s) * k) : undefined;
+function trigger(kind) {
+  if (kind === 'splash') return world.splash(focus, 1.2, { vel: runVel(0.3) });
+  const p = focus.clone();
+  if (kind === 'confetti') p.set(focus.x, 1.0, focus.z - 2);
+  if (kind === 'sparkle') p.set(focus.x, 1.2, focus.z - 2);
+  if (kind === 'dust') p.set(focus.x + 4.2, 0.42, focus.z - 1);
+  world.burst(p, { kind, vel: runVel(kind === 'dust' ? 0.2 : 0.5) });
+}
+document.querySelectorAll('[data-burst]').forEach((b) => b.onclick = () => trigger(b.dataset.burst));
+Object.assign(window, { world, scene, renderer, camera, controls, trigger, focus3: focus,
+  setRun: (x) => { running = x; }, setGameCam: (x) => { gameCam = x; } });
+
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+
+const clock = new THREE.Clock();
+let fpsT = 0, frames = 0;
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+  const dz = running ? speedAt(s) * dt : 0;
+  s += dz;
+  focus.z -= dz;
+  player.position.copy(focus);
+  sphere.rotation.x -= dz / 0.55;
+  ground.position.z = Math.round(focus.z / BLOCK) * BLOCK;
+  if (whirl.position.z > focus.z + 15) whirl.position.z -= 70;
+  if (ford.position.z > focus.z + 15) ford.position.z -= 70;
+  if (running && feet && (stepT -= dt) <= 0) {     // paw splashes
+    stepT = 0.13; paw ^= 1;
+    world.splash(v.set(focus.x + (paw ? 0.18 : -0.18), 0, focus.z + 0.3), 0.22, { vel: runVel(0.25) });
+  }
+  if (gameCam) { camera.position.set(focus.x, 3.0, focus.z + 6); controls.target.set(focus.x, 1.0, focus.z - 6); }
+  else { camera.position.z -= dz; controls.target.z -= dz; }
+  controls.update();
+  world.update(dt, time, focus, camera);
+  renderer.render(scene, camera);
+  frames++; fpsT += dt;
+  if (fpsT > 0.5) { ui('stats').textContent = `${(frames / fpsT).toFixed(0)} fps · calls ${renderer.info.render.calls} · tris ${renderer.info.render.triangles}`; frames = 0; fpsT = 0; }
+});
+</script>
+</body>
+</html>
