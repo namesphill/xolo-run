@@ -42,6 +42,8 @@ const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 400);
 const world = createWorld(renderer, scene, { quality });
 const xolo = createXolo();
 xolo.setShadow(quality === 'high');
+const XOLO_SCALE = 1.2;
+xolo.root.scale.setScalar(XOLO_SCALE);
 scene.add(xolo.root);
 const audio = new AudioFX();
 const track = new Track(scene, world, { quality });
@@ -194,7 +196,7 @@ function resize() {
   const needH = 8.6 / camera.aspect;
   const vfov = THREE.MathUtils.radToDeg(2 * Math.atan(needH / 2 / 7.2));
   baseFov = THREE.MathUtils.clamp(Math.max(58, vfov), 58, 82);
-  camBack = camera.aspect < 0.8 ? 6.8 : 6.2; camUp = camera.aspect < 0.8 ? 3.9 : 3.4;
+  camBack = camera.aspect < 0.8 ? 6.2 : 5.4; camUp = camera.aspect < 0.8 ? 3.5 : 2.9;
   camera.fov = baseFov; camera.updateProjectionMatrix();
   menuLookY = camera.aspect < 0.8 ? -0.9 : -0.35;
 }
