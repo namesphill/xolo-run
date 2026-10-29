@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Xolo Run — xolo.js demo</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #2b1640; font-family: system-ui, sans-serif; }
+  canvas { display: block; }
+  #info { position: fixed; left: 10px; top: 10px; color: #fff4de; font-size: 12px; background: rgba(30,12,40,.55); padding: 6px 9px; border-radius: 8px; pointer-events: none; line-height: 1.5; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./js/vendor/three.module.js", "three/addons/": "./js/vendor/" } }
+</script>
+</head>
+<body>
+<div id="info">xolo.js demo</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/OrbitControls.js';
+import GUI from 'three/addons/lil-gui.module.min.js';
+import { laneX, LANE_W, WATER_Y, jumpParams } from './js/config.js';
+import { pathTexture, grassTexture } from './js/textures.js';
+import { createXolo } from './js/xolo.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog('#f2a66b', 25, 70);
+
+// warm golden-hour sky (gradient sphere + sun) used for background and PMREM environment
+function skyScene() {
+  const s = new THREE.Scene();
+  const mat = new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false,
+    uniforms: { sun: { value: new THREE.Vector3(-0.4, 0.25, -1).normalize() } },
+    vertexShader: 'varying vec3 vD; void main(){ vD = normalize(position); gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+    fragmentShader: `uniform vec3 sun; varying vec3 vD;
+      void main(){ float h = vD.y;
+        vec3 top = vec3(0.28,0.22,0.55), mid = vec3(1.0,0.55,0.32), low = vec3(1.0,0.78,0.5), gnd = vec3(0.35,0.22,0.15);
+        vec3 c = h > 0.0 ? mix(low, mix(mid, top, smoothstep(0.15,0.8,h)), smoothstep(0.0,0.15,h)) : mix(low, gnd, smoothstep(0.0,0.3,-h));
+        float sd = max(dot(normalize(vD), sun), 0.0);
+        c += vec3(1.0,0.75,0.4) * (pow(sd, 400.0)*6.0 + pow(sd, 12.0)*0.5);
+        gl_FragColor = vec4(c,1.0); }`,
+  });
+  s.add(new THREE.Mesh(new THREE.SphereGeometry(50, 32, 16), mat));
+  return s;
+}
+const sky = skyScene();
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(sky, 0.02).texture;
+scene.background = new THREE.Color('#f0a46e');
+const skyMesh = sky.children[0]; skyMesh.scale.setScalar(1.2); scene.add(skyMesh);
+
+const hemi = new THREE.HemisphereLight('#ffd9a8', '#5a3a26', 0.9);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight('#ffc387', 2.6);
+sun.position.set(-4, 7, -6);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+Object.assign(sun.shadow.camera, { left: -4, right: 4, top: 4, bottom: -4, near: 0.5, far: 25 });
+sun.shadow.bias = -0.0005; sun.shadow.normalBias = 0.02;
+scene.add(sun, sun.target);
+const rim = new THREE.DirectionalLight('#ff9a5a', 0.8); rim.position.set(3, 3, 5); scene.add(rim);
+
+// moving ground: 3 lanes of chinampa path + grass + water
+const TILE = 6;
+const pathTex = pathTexture().clone(); pathTex.needsUpdate = true; pathTex.repeat.set(1, 120 / TILE);
+const ground = new THREE.Group(); scene.add(ground);
+for (let i = 0; i < 3; i++) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(LANE_W, 120), new THREE.MeshStandardMaterial({ map: pathTex, roughness: 0.95 }));
+  m.rotation.x = -Math.PI / 2; m.position.set(laneX(i), 0, -40); m.receiveShadow = true; ground.add(m);
+}
+const grassTex = grassTexture().clone(); grassTex.needsUpdate = true; grassTex.repeat.set(2, 120 / TILE);
+for (const s of [-1, 1]) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(6, 120), new THREE.MeshStandardMaterial({ map: grassTex, roughness: 1 }));
+  m.rotation.x = -Math.PI / 2; m.position.set(s * (LANE_W * 1.5 + 3), 0.001, -40); m.receiveShadow = true; ground.add(m);
+}
+const water = new THREE.Mesh(new THREE.PlaneGeometry(30, 120), new THREE.MeshPhysicalMaterial({ color: '#1f6f6a', roughness: 0.08, transparent: true, opacity: 0.85 }));
+water.rotation.x = -Math.PI / 2; water.position.set(0, WATER_Y, -40); water.visible = false; scene.add(water);
+
+// the dog
+const xolo = createXolo();
+xolo.setShadow(true);
+scene.add(xolo.root);
+
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.05, 200);
+camera.position.set(1.6, 1.2, -2.2);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.6, 0);
+controls.enableDamping = true;
+
+// sim state
+const sim = { mode: 'idle', speed: 14, lane: 1, x: 0, y: 0, vy: 0, grounded: true, g: 0, lateral: 0, sinking: false, camera: 'orbit', autoplay: false };
+let autoT = 0;
+const actions = {
+  idle() { sim.mode = 'idle'; },
+  run() { sim.mode = 'run'; },
+  jump() {
+    if (!sim.grounded || sim.mode === 'dead') return;
+    const jp = jumpParams(Math.max(sim.speed, 12)); sim.vy = jp.vy; sim.g = jp.g; sim.grounded = false; xolo.onJump();
+  },
+  laneLeft() { if (sim.lane > 0 && sim.mode !== 'dead') { sim.lane--; xolo.onLane(-1); } },
+  laneRight() { if (sim.lane < 2 && sim.mode !== 'dead') { sim.lane++; xolo.onLane(1); } },
+  stumbleLeft() { xolo.onStumble(-1); },
+  stumbleRight() { xolo.onStumble(1); },
+  land() { xolo.onLand(1); },
+  deathCrash() { sim.mode = 'dead'; xolo.onDeath('crash'); },
+  deathSplash() { sim.mode = 'dead'; sim.sinking = true; ground.visible = false; water.visible = true; xolo.onDeath('splash'); },
+  reset() { sim.mode = 'idle'; sim.lane = 1; sim.x = 0; sim.y = 0; sim.vy = 0; sim.grounded = true; sim.sinking = false; ground.visible = true; water.visible = false; xolo.reset(); },
+  gameCamera() { sim.camera = 'game'; controls.enabled = false; },
+  orbitCamera() { sim.camera = 'orbit'; controls.enabled = true; controls.target.set(xolo.root.position.x, 0.6, 0); camera.position.set(xolo.root.position.x + 1.6, 1.2, -2.2); },
+  backCamera() { sim.camera = 'orbit'; controls.enabled = true; controls.target.set(xolo.root.position.x, 0.6, 0); camera.position.set(xolo.root.position.x + 0.9, 1.5, 2.2); },
+};
+window.xolo = xolo; window.actions = actions; window.sim = sim; window.camera = camera; window.controls = controls;
+
+const gui = new GUI({ title: 'Xolo' });
+const fa = gui.addFolder('Animation');
+fa.add(sim, 'mode', ['idle', 'run', 'dead']).listen();
+fa.add(sim, 'speed', 0, 30, 0.5);
+fa.add(sim, 'autoplay').name('auto lanes/jumps');
+for (const k of ['idle', 'run', 'jump', 'laneLeft', 'laneRight', 'land', 'stumbleLeft', 'stumbleRight', 'deathCrash', 'deathSplash', 'reset']) fa.add(actions, k);
+const fc = gui.addFolder('Camera');
+fc.add(actions, 'gameCamera').name('game camera');
+fc.add(actions, 'orbitCamera').name('orbit (3/4 front)');
+fc.add(actions, 'backCamera').name('orbit (behind)');
+const fp = gui.addFolder('Params');
+const P = xolo.params, rb = () => xolo.rebuild();
+fp.addColor(P, 'skinColor').onChange(rb);
+fp.add(P, 'roughness', 0, 1, 0.01).onChange(() => xolo.applyMaterials());
+fp.add(P, 'clearcoat', 0, 1, 0.01).onChange(() => xolo.applyMaterials());
+fp.add(P, 'clearcoatRoughness', 0, 1, 0.01).onChange(() => xolo.applyMaterials());
+fp.add(P, 'envMapIntensity', 0, 3, 0.05).onChange(() => xolo.applyMaterials());
+fp.addColor(P, 'eyeColor').onChange(() => xolo.applyMaterials());
+fp.addColor(P, 'innerEarColor').onChange(() => xolo.applyMaterials());
+fp.add(P, 'earScale', 0.6, 1.5, 0.01).onChange(rb);
+fp.add(P, 'headScale', 0.7, 1.4, 0.01).onChange(rb);
+fp.add(P, 'legLength', 0.7, 1.4, 0.01).onChange(rb);
+fp.add(P, 'tailLength', 0.4, 1.6, 0.01).onChange(rb);
+fp.add(P, 'collar').onChange(rb);
+fp.add(P, 'tuft').onChange(rb);
+fp.add(P, 'animSpeed', 0.3, 2, 0.01);
+fp.add(P, 'springiness', 0.3, 2, 0.01).onChange(() => xolo.reset());
+const shadowObj = { shadow: true };
+fp.add(shadowObj, 'shadow').onChange((v) => xolo.setShadow(v));
+fp.close();
+
+addEventListener('keydown', (e) => {
+  if (e.code === 'ArrowLeft' || e.code === 'KeyA') actions.laneLeft();
+  if (e.code === 'ArrowRight' || e.code === 'KeyD') actions.laneRight();
+  if (e.code === 'Space' || e.code === 'ArrowUp') actions.jump();
+  if (e.code === 'KeyR') actions.reset();
+});
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+
+const info = document.getElementById('info');
+const clock = new THREE.Clock();
+let fpsAcc = 0, fpsN = 0, fps = 0;
+function frame() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const running = sim.mode === 'run';
+  if (sim.autoplay && running) {
+    autoT -= dt;
+    if (autoT < 0) { autoT = 0.8 + Math.random() * 0.9; const r = Math.random(); if (r < 0.35) actions.jump(); else if (r < 0.68) (sim.lane === 0 ? actions.laneRight : sim.lane === 2 ? actions.laneLeft : Math.random() < 0.5 ? actions.laneLeft : actions.laneRight)(); else if (r < 0.75) actions.stumbleLeft(); }
+  }
+  // lateral move
+  const tx = laneX(sim.lane), px = sim.x;
+  if (sim.mode !== 'dead') sim.x = THREE.MathUtils.damp(sim.x, tx, 14, dt);
+  sim.lateral = (sim.x - px) / dt;
+  // vertical
+  if (!sim.grounded) {
+    sim.y += sim.vy * dt; sim.vy -= sim.g * dt;
+    if (sim.y <= 0) { const strength = Math.min(1, Math.abs(sim.vy) / jumpParams(Math.max(sim.speed, 12)).vy); sim.y = 0; sim.vy = 0; sim.grounded = true; xolo.onLand(strength); }
+  }
+  if (sim.sinking) { sim.y = THREE.MathUtils.damp(sim.y, WATER_Y - 0.7, 1.6, dt); }
+  xolo.root.position.set(sim.x, sim.y, 0);
+  if (running) pathTex.offset.y += (sim.speed * dt) / TILE, grassTex.offset.y = pathTex.offset.y * 2;
+  xolo.update(dt, { mode: sim.mode, speed: running ? sim.speed : 0, grounded: sim.grounded, vy: sim.vy, lateral: sim.lateral });
+
+  if (sim.camera === 'game') {
+    const p = xolo.root.position;
+    camera.position.set(p.x * 0.6, 3.4 + p.y * 0.3, 6.2);
+    camera.lookAt(p.x * 0.6, 1.1, -6);
+  } else controls.update();
+  sun.position.set(xolo.root.position.x - 4, 7, -6); sun.target.position.copy(xolo.root.position);
+  renderer.render(scene, camera);
+  fpsAcc += dt; fpsN++; if (fpsAcc > 0.5) { fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; }
+  info.innerHTML = `xolo.js demo · ${fps.toFixed(0)} fps · draw calls ${renderer.info.render.calls} · tris ${renderer.info.render.triangles}<br>keys: ←/→ lanes · space jump · R reset`;
+  requestAnimationFrame(frame);
+}
+frame();
+</script>
+</body>
+</html>
