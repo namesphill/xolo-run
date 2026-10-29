@@ -228,7 +228,7 @@ function simStep() {
   const evs = stepPlayer(player, input, DT, track.sections);
   input.left = input.right = input.jump = 0;
   for (const ev of evs) {
-    if (ev.type === 'lane') { xolo.onLane(ev.dir); audio.sfx('lane'); }
+    if (ev.type === 'lane') { xolo.onLane(ev.dir); audio.sfx('lane', { dir: ev.dir }); }
     else if (ev.type === 'jump') { xolo.onJump(); audio.sfx('jump'); }
     else if (ev.type === 'land') {
       const st = Math.min(1, Math.abs(ev.vy) / 14);

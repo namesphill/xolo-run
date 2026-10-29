@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="data:," />
+<title>Xolo Run — Audio demo</title>
+<style>
+  @font-face { font-family: 'Lilita One'; src: url('fonts/lilita.woff2') format('woff2'); }
+  @font-face { font-family: 'Nunito'; src: url('fonts/nunito.woff2') format('woff2'); font-weight: 200 1000; }
+  :root { --marigold: #ff9a1f; --rosa: #e8177d; --turq: #12b5b0; --morado: #2b1640; --cream: #fff4de; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; font-family: Nunito, system-ui, sans-serif; color: var(--cream);
+    background: radial-gradient(ellipse at 50% 0%, #ffb35c 0%, #e8177d 28%, #2b1640 70%); }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 22px 18px 40px; }
+  h1 { font-family: 'Lilita One'; font-size: 40px; margin: 0 0 4px; letter-spacing: 1px; text-shadow: 0 3px 0 #a63f00; }
+  h1 span { color: var(--marigold); }
+  .sub { opacity: .85; margin: 0 0 16px; }
+  .card { background: rgba(29,16,41,.62); border: 2px solid rgba(255,244,222,.18); border-radius: 18px; padding: 14px 16px; margin-bottom: 14px; }
+  .card h2 { font-family: 'Lilita One'; font-weight: 400; font-size: 20px; margin: 0 0 10px; color: var(--marigold); letter-spacing: 1px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
+  button { font-family: 'Lilita One'; font-size: 16px; letter-spacing: .5px; color: #fff; border: 0; border-radius: 999px; padding: 10px 14px; cursor: pointer;
+    background: linear-gradient(180deg, #ffb53d, #ff9a1f 45%, #e86a00); box-shadow: 0 4px 0 #a63f00; transition: transform .06s; }
+  button:active { transform: translateY(3px); box-shadow: 0 1px 0 #a63f00; }
+  button.alt { background: linear-gradient(180deg, #2fd6cf, #12b5b0 50%, #0b807c); box-shadow: 0 4px 0 #075a57; }
+  button.rosa { background: linear-gradient(180deg, #ff5fae, #e8177d 50%, #a50d57); box-shadow: 0 4px 0 #6d0839; }
+  button.on { outline: 3px solid var(--cream); }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+  label { display: flex; align-items: center; gap: 8px; font-weight: 800; }
+  input[type=range] { width: 200px; accent-color: var(--marigold); }
+  .val { font-variant-numeric: tabular-nums; min-width: 3em; display: inline-block; }
+  canvas { width: 100%; height: 150px; display: block; border-radius: 12px; background: #1d1029; }
+  .tiny { font-size: 13px; opacity: .75; }
+  #status { font-weight: 800; }
+  kbd { background: rgba(255,255,255,.15); border-radius: 5px; padding: 1px 6px; font-family: inherit; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./js/vendor/three.module.js", "three/addons/": "./js/vendor/" } }
+</script>
+</head>
+<body>
+<div class="wrap">
+  <h1>XOLO <span>RUN</span> — audio</h1>
+  <p class="sub">Fully synthesized WebAudio: marimba, guitarrón, jarana, shaker &amp; cajón in 6/8. No audio files.</p>
+
+  <div class="card">
+    <canvas id="viz" width="1700" height="300"></canvas>
+    <div class="row" style="margin-top:10px">
+      <span id="status">Click any button to unlock audio.</span>
+      <span class="tiny" id="ctxinfo"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Música</h2>
+    <div class="row">
+      <button id="m-start" class="alt">▶ Start music</button>
+      <button id="m-stop" class="alt">■ Stop music</button>
+      <button id="pause" class="alt">Pause all</button>
+      <button id="resume" class="alt">Resume all</button>
+      <button id="mute" class="rosa">Mute</button>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <label>Intensity <input id="intensity" type="range" min="0" max="1" step="0.01" value="0" /> <span class="val" id="int-v">0.00</span></label>
+      <label><input id="ramp" type="checkbox" /> auto-ramp (simulated game speed)</label>
+    </div>
+    <p class="tiny">Layers: marimba melody + guitarrón + jarana always; shaker fills in &gt;0.12, cajón from ~0.15, high marimba arpeggio from ~0.4, harmony thirds from ~0.65, 16th shaker/arp &gt;0.7–0.85. Tempo 110→120 bpm (dotted quarter).</p>
+  </div>
+
+  <div class="card">
+    <h2>Efectos (SFX)</h2>
+    <div class="grid" id="sfx"></div>
+    <div class="row" style="margin-top:12px">
+      <label>Combo <span class="val" id="combo-v">0</span></label>
+      <button id="combo-reset" class="alt">Reset combo</button>
+      <button id="combo-run" class="alt">Calaverita streak ×12</button>
+      <label>Land strength <input id="strength" type="range" min="0" max="1" step="0.01" value="0.6" /> <span class="val" id="str-v">0.60</span></label>
+    </div>
+    <p class="tiny">Keys: <kbd>←</kbd>/<kbd>→</kbd> lane, <kbd>Space</kbd> jump (auto-lands), <kbd>C</kbd> collect, <kbd>M</kbd> mute.</p>
+  </div>
+</div>
+
+<script type="module">
+import { AudioFX } from './js/audio.js';
+const audio = new AudioFX();
+window.audio = audio;
+
+const $ = (id) => document.getElementById(id);
+const NAMES = ['collect', 'jump', 'land', 'lane', 'stumble', 'splash', 'crash', 'start', 'gameover', 'newbest', 'click', 'whoosh'];
+let combo = 0;
+const comboV = $('combo-v');
+const setCombo = (c) => { combo = c; comboV.textContent = c; };
+
+function ensure() {
+  audio.unlock().then(() => {
+    const c = audio.context;
+    $('status').textContent = audio.muted ? 'Muted' : 'Audio running';
+    $('ctxinfo').textContent = c ? `${c.sampleRate} Hz · state ${c.state} · baseLatency ${(c.baseLatency * 1000 || 0).toFixed(1)} ms` : '';
+  });
+}
+document.addEventListener('pointerdown', ensure, { capture: true });
+document.addEventListener('keydown', ensure, { capture: true });
+
+function play(name) {
+  ensure();
+  if (name === 'collect') { audio.sfx('collect', { combo }); setCombo(combo + 1); }
+  else if (name === 'land') audio.sfx('land', { strength: +$('strength').value });
+  else if (name === 'lane') audio.sfx('lane', { dir: Math.random() < 0.5 ? -1 : 1 });
+  else audio.sfx(name);
+}
+const grid = $('sfx');
+for (const n of NAMES) {
+  const b = document.createElement('button');
+  b.textContent = n; b.dataset.sfx = n;
+  if (['crash', 'gameover', 'splash', 'stumble'].includes(n)) b.className = 'rosa';
+  b.addEventListener('click', () => play(n));
+  grid.appendChild(b);
+}
+
+$('combo-reset').onclick = () => { setCombo(0); audio.sfx('click'); };
+$('combo-run').onclick = () => { ensure(); setCombo(0); for (let i = 0; i < 12; i++) setTimeout(() => play('collect'), 90 * i); };
+$('strength').oninput = (e) => { $('str-v').textContent = (+e.target.value).toFixed(2); };
+
+$('m-start').onclick = () => { ensure(); audio.startMusic(); audio.sfx('click'); };
+$('m-stop').onclick = () => { audio.stopMusic(); audio.sfx('click'); };
+$('pause').onclick = () => { audio.sfx('click'); audio.pauseAll(); };
+$('resume').onclick = () => { audio.resumeAll(); audio.sfx('click'); };
+const muteBtn = $('mute');
+const syncMute = () => { muteBtn.textContent = audio.muted ? 'Unmute' : 'Mute'; muteBtn.classList.toggle('on', audio.muted); $('status').textContent = audio.muted ? 'Muted' : (audio.context ? 'Audio running' : $('status').textContent); };
+muteBtn.onclick = () => { audio.toggleMute(); audio.sfx('click'); syncMute(); };
+syncMute();
+
+const intensity = $('intensity');
+const setI = (v) => { intensity.value = v; $('int-v').textContent = (+v).toFixed(2); audio.setMusicIntensity(+v); };
+intensity.oninput = (e) => setI(e.target.value);
+let rampT = 0;
+setInterval(() => {
+  if (!$('ramp').checked) return;
+  rampT += 0.1;
+  setI(1 - Math.exp(-rampT / 25)); // mirrors config.speedAt's exponential approach
+}, 100);
+$('ramp').onchange = (e) => { if (e.target.checked) { rampT = 0; setI(0); } };
+
+let jumping = false;
+addEventListener('keydown', (e) => {
+  if (e.repeat) return;
+  if (e.code === 'ArrowLeft') audio.sfx('lane', { dir: -1 });
+  else if (e.code === 'ArrowRight') audio.sfx('lane', { dir: 1 });
+  else if (e.code === 'Space' || e.code === 'ArrowUp') {
+    e.preventDefault();
+    if (!jumping) { jumping = true; audio.sfx('jump'); setTimeout(() => { jumping = false; audio.sfx('land', { strength: 0.6 }); }, 620); }
+  } else if (e.code === 'KeyC') play('collect');
+  else if (e.code === 'KeyM') { audio.toggleMute(); syncMute(); }
+});
+
+// visualizer: spectrum bars + waveform
+const cv = $('viz'), g = cv.getContext('2d');
+let freq, wave;
+function draw() {
+  requestAnimationFrame(draw);
+  const W = cv.width, H = cv.height;
+  g.fillStyle = '#1d1029'; g.fillRect(0, 0, W, H);
+  const an = audio.analyser;
+  if (!an) { g.fillStyle = 'rgba(255,244,222,.5)'; g.font = '40px Lilita One'; g.textAlign = 'center'; g.fillText('🔇 tap to unlock', W / 2, H / 2 + 14); return; }
+  if (!freq) { freq = new Uint8Array(an.frequencyBinCount); wave = new Uint8Array(an.fftSize); }
+  an.getByteFrequencyData(freq); an.getByteTimeDomainData(wave);
+  const bins = 96, bw = W / bins;
+  for (let i = 0; i < bins; i++) {
+    const idx = Math.floor(Math.pow(i / bins, 1.8) * (freq.length * 0.7));
+    const v = freq[idx] / 255;
+    g.fillStyle = `hsl(${(30 + 330 * (i / bins)) % 360}, 90%, ${45 + v * 20}%)`;
+    g.fillRect(i * bw + 2, H - v * H * 0.92, bw - 4, v * H * 0.92);
+  }
+  g.strokeStyle = '#fff4de'; g.lineWidth = 3; g.beginPath();
+  for (let i = 0; i < wave.length; i++) { const x = (i / wave.length) * W, y = (wave[i] / 255) * H; i ? g.lineTo(x, y) : g.moveTo(x, y); }
+  g.stroke();
+}
+draw();
+</script>
+</body>
+</html>
