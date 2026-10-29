@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Xolo Run — Model Viewer</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #2b1640; font-family: system-ui, sans-serif; }
+  canvas { display: block; }
+  #info { position: absolute; left: 12px; bottom: 12px; color: #fff4de; font-size: 13px; background: rgba(29,16,41,.7); padding: 8px 12px; border-radius: 10px; max-width: 46ch; line-height: 1.4; }
+  #info b { color: #ff9a1f; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./js/vendor/three.module.js", "three/addons/": "./js/vendor/" } }
+</script>
+</head>
+<body>
+<div id="info"><b>Model viewer</b>: drag to orbit, scroll to zoom, right-drag to pan. Pick a model and animation in the panel. Red wireframe = gameplay collision box, yellow = the mesh's real bounds. Copy params with “Export params”.</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/OrbitControls.js';
+import GUI from 'three/addons/lil-gui.module.min.js';
+import { createWorld } from './js/world.js';
+import { createXolo } from './js/xolo.js';
+import * as Models from './js/models.js';
+import { OB } from './js/planner.js';
+import { PLAYER, DECK_Y, CROSSER_TOP, jumpParams } from './js/config.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.05, 500);
+camera.position.set(3, 2.2, 4);
+const world = createWorld(renderer, scene, { quality: 'high' });
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.6, 0); controls.enableDamping = true;
+
+const ground = new THREE.Mesh(new THREE.CircleGeometry(14, 64).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xb88252, roughness: 0.95 }));
+ground.receiveShadow = true; scene.add(ground);
+const grid = new THREE.GridHelper(28, 28, 0x6e4528, 0x8d5d37); grid.position.y = 0.002; grid.material.transparent = true; grid.material.opacity = 0.35; scene.add(grid);
+
+// gameplay collision boxes (must match js/physics.js)
+function collisionBox(id) {
+  if (id === 'xolo') return { min: [-PLAYER.halfW, 0, -PLAYER.front], max: [PLAYER.halfW, PLAYER.height, PLAYER.back] };
+  for (const k in OB) if (id.toLowerCase().includes(k)) {
+    const o = OB[k]; const len = k === 'stall' ? 8 : o.len;
+    return { min: [-o.w / 2, 0, -len / 2], max: [o.w / 2, o.h, len / 2], len };
+  }
+  if (/deck/i.test(id)) return { min: [-0.95, -1, -4], max: [0.95, DECK_Y, 4] };
+  if (/small|cross/i.test(id)) return { min: [-1.7, -1, -0.65], max: [1.7, CROSSER_TOP, 0.65] };
+  return null;
+}
+
+const entries = [{ id: 'xolo', label: 'Xolo (player)' }, ...(Models.MODEL_LIST || [])];
+if (!Models.MODEL_LIST || !Models.MODEL_LIST.length) {
+  for (const k of Object.keys(OB)) entries.push({ id: 'obstacle-' + k, label: 'Obstacle: ' + k, make: () => Models.makeObstacle(k, 0, k === 'stall' ? 8 : undefined) });
+  entries.push({ id: 'trajinera-deck', label: 'Trajinera (deck)', make: () => Models.makeTrajinera({ len: 8, style: 'deck', name: 'Lupita' }) });
+  entries.push({ id: 'trajinera-small', label: 'Trajinera (small crosser)', make: () => Models.makeTrajinera({ style: 'small', name: 'Xóchitl' }) });
+  entries.push({ id: 'trajinera-decor', label: 'Trajinera (decor)', make: () => Models.makeTrajinera({ len: 9, style: 'decor', name: 'Mi Cielo' }) });
+  entries.push({ id: 'arch', label: 'Flower arch', make: () => Models.makeFlowerArch(9.6) });
+  entries.push({ id: 'papel', label: 'Papel picado', make: () => Models.makePapelString(9.2) });
+}
+
+const state = { model: entries[0].label, anim: 'run', speed: 16, turntable: false, collision: true, bounds: false, gameCam: false, slowmo: 1, water: true, shadows: true };
+let current = null, xolo = null, boxHelpers = [], params = null, paramFolder = null;
+const gui = new GUI({ title: 'Xolo Run models' });
+const animCtl = gui.add(state, 'anim', ['idle', 'run', 'jump loop', 'lane switch loop', 'land', 'stumble', 'death: crash', 'death: splash']).name('Xolo animation').onChange(restartAnim);
+gui.add(state, 'model', entries.map((e) => e.label)).name('Model').onChange(load);
+gui.add(state, 'speed', 4, 30, 0.5).name('Run speed');
+gui.add(state, 'slowmo', 0.05, 1, 0.05).name('Time scale');
+gui.add(state, 'turntable').name('Turntable');
+gui.add(state, 'collision').name('Collision box').onChange(updateBoxes);
+gui.add(state, 'bounds').name('Mesh bounds').onChange(updateBoxes);
+gui.add(state, 'gameCam').name('Game camera view').onChange((v) => { if (v) { camera.position.set(0, 3.4, 6.2); controls.target.set(0, 1.0, -6); } else { camera.position.set(3, 2.2, 4); controls.target.set(0, 0.6, 0); } });
+gui.add(state, 'water').name('Show water (y=-0.55)').onChange((v) => { scene.traverse((o) => { if (o.material === world.waterMaterial) o.visible = v; }); });
+gui.add({ exportParams() { const txt = JSON.stringify(params || {}, null, 2); navigator.clipboard?.writeText(txt); console.log(txt); alert('Params copied to clipboard:\n' + txt); } }, 'exportParams').name('Export params');
+
+function clearBoxes() { for (const b of boxHelpers) { scene.remove(b); b.geometry?.dispose(); } boxHelpers = []; }
+function updateBoxes() {
+  clearBoxes();
+  const e = entries.find((x) => x.label === state.model);
+  if (state.collision) {
+    const cb = (e.box && { min: e.box.min, max: e.box.max }) || collisionBox(e.id);
+    if (cb) {
+      const h = new THREE.Box3Helper(new THREE.Box3(new THREE.Vector3(...cb.min), new THREE.Vector3(...cb.max)), 0xff2050);
+      scene.add(h); boxHelpers.push(h);
+    }
+  }
+  if (state.bounds && current) {
+    const h = new THREE.BoxHelper(current, 0xffe14d); scene.add(h); boxHelpers.push(h); h.userData.live = true;
+  }
+}
+
+function buildParamGui(p, onChange) {
+  if (paramFolder) paramFolder.destroy();
+  paramFolder = null; params = p;
+  if (!p) return;
+  paramFolder = gui.addFolder('Model params (live)');
+  for (const k of Object.keys(p)) {
+    const v = p[k];
+    let c;
+    if (typeof v === 'boolean') c = paramFolder.add(p, k);
+    else if (typeof v === 'number') {
+      const isColor = /color/i.test(k) && v > 255;
+      c = isColor ? paramFolder.addColor(p, k) : paramFolder.add(p, k, Math.min(0, v * 2), Math.max(1, v * 2.5), 0.01);
+    } else if (typeof v === 'string' && /^#/.test(v)) c = paramFolder.addColor(p, k);
+    else if (typeof v === 'string') c = paramFolder.add(p, k);
+    else continue;
+    c.onFinishChange(onChange);
+  }
+}
+
+function load() {
+  if (current) scene.remove(current);
+  xolo = null;
+  const e = entries.find((x) => x.label === state.model);
+  animCtl.show(e.id === 'xolo');
+  if (e.id === 'xolo') {
+    xolo = createXolo(); xolo.setShadow(true); current = xolo.root;
+    buildParamGui(xolo.params, () => { xolo.rebuild(); xolo.setShadow(true); updateBoxes(); });
+    restartAnim();
+  } else {
+    current = e.make();
+    current.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    buildParamGui(e.params || null, () => { scene.remove(current); current = e.make(); scene.add(current); updateBoxes(); });
+  }
+  scene.add(current);
+  const box = new THREE.Box3().setFromObject(current);
+  const size = box.getSize(new THREE.Vector3()).length();
+  if (!state.gameCam) {
+    controls.target.copy(box.getCenter(new THREE.Vector3()));
+    camera.position.copy(controls.target).add(new THREE.Vector3(0.7, 0.45, 1).normalize().multiplyScalar(Math.max(2.2, size * 1.25)));
+  }
+  updateBoxes();
+}
+
+// animation driver for the xolo
+const sim = { t: 0, y: 0, vy: 0, grounded: true, x: 0, lane: 0, lastEvent: 0, dead: false };
+function restartAnim() {
+  if (!xolo) return;
+  xolo.reset();
+  Object.assign(sim, { t: 0, y: 0, vy: 0, grounded: true, x: 0, lane: 0, lastEvent: -1, dead: false });
+  xolo.root.position.set(0, 0, 0);
+}
+function driveXolo(dt) {
+  sim.t += dt;
+  const a = state.anim;
+  const jp = jumpParams(state.speed);
+  let mode = a === 'idle' ? 'idle' : 'run';
+  let lateral = 0;
+  const every = (period, fn) => { const k = Math.floor(sim.t / period); if (k !== sim.lastEvent) { sim.lastEvent = k; fn(k); } };
+  if (a === 'jump loop') every(1.4, () => { sim.vy = jp.vy; sim.grounded = false; xolo.onJump(); });
+  if (a === 'land') every(1.2, () => { sim.y = 1.6; sim.vy = -2; sim.grounded = false; });
+  if (a === 'lane switch loop') every(0.9, (k) => { const dir = k % 4 < 2 ? 1 : -1; sim.lane = Math.max(-1, Math.min(1, sim.lane + dir)); xolo.onLane(dir); });
+  if (a === 'stumble') every(1.2, (k) => xolo.onStumble(k % 2 ? 1 : -1));
+  if (a.startsWith('death')) {
+    mode = 'dead';
+    if (!sim.dead) { sim.dead = true; xolo.onDeath(a.endsWith('splash') ? 'splash' : 'crash'); }
+    if (a.endsWith('splash')) sim.y = Math.max(-1.4, -sim.t * 1.2);
+    if (sim.t > 2.6) restartAnim();
+  }
+  if (!sim.grounded) {
+    sim.vy -= jp.g * dt; sim.y += sim.vy * dt;
+    if (sim.y <= 0) { const st = Math.min(1, Math.abs(sim.vy) / 14); sim.y = 0; sim.vy = 0; sim.grounded = true; xolo.onLand(st); }
+  }
+  const tx = sim.lane * 1.1;
+  const nx = sim.x + (tx - sim.x) * (1 - Math.exp(-dt * 17));
+  lateral = (nx - sim.x) / Math.max(dt, 1e-4); sim.x = nx;
+  xolo.root.position.set(sim.x, sim.y, 0);
+  xolo.update(dt, { mode, speed: mode === 'run' ? state.speed : 0, grounded: sim.grounded, vy: sim.vy, lateral });
+}
+
+function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+addEventListener('resize', resize); resize();
+load();
+
+const clock = new THREE.Clock();
+let time = 0;
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(0.05, clock.getDelta()) * state.slowmo;
+  time += dt;
+  if (xolo) driveXolo(dt);
+  if (current && state.turntable) current.rotation.y += dt * 0.5;
+  current?.userData?.update?.(time);
+  for (const b of boxHelpers) if (b.userData.live) b.update();
+  world.update(dt, time, new THREE.Vector3(0, 0, 0), camera);
+  scene.fog = null;
+  controls.update();
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
