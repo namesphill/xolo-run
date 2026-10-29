@@ -151,7 +151,7 @@ function gameOver() {
 }
 
 // ---------------- autoplay ----------------
-let auto = params.has('auto');
+let auto = false;
 const AP_ACTS = [{}, { left: 1 }, { right: 1 }, { jump: 1 }, { left: 1, jump: 1 }, { right: 1, jump: 1 }];
 const AP_COST = [0, 0.35, 0.35, 0.25, 0.5, 0.5];
 function autoDecide() {
@@ -378,7 +378,6 @@ function frame(now) {
 resetRun();
 updateCamera(1);
 if (!CAPTURE) requestAnimationFrame((t) => { last = t; frame(t); }); else last = 0;
-if (auto && !CAPTURE) setTimeout(() => startRun(), 1200);
 setTimeout(() => { ui.loading.classList.add('fade'); setTimeout(() => show(ui.loading, false), 600); }, 150);
 
 // debug/testing hooks
