@@ -17,7 +17,8 @@ const CANAL_X = EDGE + SIDE_W;  // side canal starts here
 const CANAL_W = 6;
 const FAR_X = CANAL_X + CANAL_W;
 const BOTTOM = -1.2;
-const AHEAD = 230, BEHIND = 40;
+const AHEAD = 160, BEHIND = 30;
+const CHUNK = 24;
 
 // Small geometry builder with world-space UVs (one draw call per material per section).
 class GeoBuilder {
@@ -135,7 +136,7 @@ export class Track {
     this.hazardTime = { value: 0 };
     this.reeds = Models.makeReedAssets ? Models.makeReedAssets() : null;
     this.lilies = Models.makeLilyAssets ? Models.makeLilyAssets() : null;
-    this.skullAssets = makeSkullAssets();
+    this.skullAssets = makeSkullAssets({ segments: quality === 'low' ? 12 : 18 });
     this.trees = makeTreeAssets();
     this.flowers = makeFlowerAssets();
     const CAP = 700;
@@ -314,55 +315,64 @@ export class Track {
     addGeo(bank, this.mat.bank); addGeo(wood, this.mat.wood); addGeo(grass, this.mat.grass);
 
     // ---- vegetation (instanced) ----
-    const flowers = [], bushes = [], trees = [], reeds = [], lilies = [], petals = [];
+    const flowers = [], bushes = [], trees = [], nearTrees = [], reeds = [], lilies = [], petals = [];
+    const dens = this.quality === 'low' ? 0.5 : 1;
+
     const onSide = (s, m = 0.6) => sideLand.some(([a, b]) => s > a + m && s < b - m);
     // floating marigold garlands mark the lane dividers where both lanes are safe
     for (const [x, iv] of [[-LANE_W / 2, intersect(laneLand[0], laneLand[1])], [LANE_W / 2, intersect(laneLand[1], laneLand[2])]]) {
       for (const [a, b] of iv) for (let s = a + 0.3; s < b - 0.3; s += 0.75) petals.push([x + (rng() - 0.5) * 0.08, s, 0.55 + rng() * 0.2, 0.0]);
     }
     for (const sgn of [-1, 1]) {
-      for (let s = s0; s < s1; s += 0.5) {
+      for (let s = s0; s < s1; s += 0.9 / dens) {
         if (!onSide(s)) continue;
-        for (let r = 0; r < 4; r++) if (rng() < 0.85) flowers.push([sgn * (BANK_IN + 0.35 + r * 0.36 + rng() * 0.2), s + rng() * 0.4, 0.9 + rng() * 0.5, BANK_H]);
+        for (let r = 0; r < 3; r++) if (rng() < 0.75) flowers.push([sgn * (BANK_IN + 0.35 + r * 0.4 + rng() * 0.2), s + rng() * 0.5, 1.0 + rng() * 0.5, BANK_H]);
       }
-      for (let s = s0 + rng() * 2; s < s1; s += 1.1 + rng() * 1.2) {
+      for (let s = s0 + rng() * 2; s < s1; s += (1.4 + rng() * 1.4) / dens) {
         if (onSide(s, 0.3)) reeds.push([sgn * (EDGE + 0.05 + rng() * 0.35), s, 0.8 + rng() * 0.5, 0]);
       }
-      for (let s = s0 + rng() * 6; s < s1; s += 5 + rng() * 6) lilies.push([sgn * (EDGE - 0.15 + rng() * 0.4), s, 0.7 + rng() * 0.5, 0.0]);
-      for (let s = s0 + rng() * 3; s < s1; s += 2.4) {
+      for (let s = s0 + rng() * 6; s < s1; s += (7 + rng() * 8) / dens) lilies.push([sgn * (EDGE - 0.15 + rng() * 0.4), s, 0.7 + rng() * 0.5, 0.0]);
+      for (let s = s0 + rng() * 3; s < s1; s += 3 / dens) {
         if (!onSide(s)) continue;
         bushes.push([sgn * (BANK_IN + 2.4 + rng() * 0.8), s, 0.8 + rng() * 0.6, BANK_H]);
-        for (let c = 0; c < 3; c++) if (rng() < 0.7) flowers.push([sgn * (BANK_IN + 3.4 + c * 0.9), s + rng(), 1.3 + rng() * 0.6, BANK_H]);
+        for (let c = 0; c < 2; c++) if (rng() < 0.7) flowers.push([sgn * (BANK_IN + 3.4 + c * 0.9), s + rng(), 1.3 + rng() * 0.6, BANK_H]);
       }
       // ahuejote walls: a dense row right at the chinampa edge, another behind, more across the side canal
-      for (let s = s0 + rng() * 2; s < s1; s += 2.6 + rng() * 1.6) {
-        if (onSide(s, 0.8)) trees.push([sgn * (BANK_IN + 1.2 + rng() * 0.5), s, 1.0 + rng() * 0.35, BANK_H]);
+      for (let s = s0 + rng() * 2; s < s1; s += (3.0 + rng() * 1.8) / Math.sqrt(dens)) {
+        if (onSide(s, 0.8)) nearTrees.push([sgn * (BANK_IN + 1.2 + rng() * 0.5), s, 1.0 + rng() * 0.35, BANK_H]);
         if (onSide(s + 1.3, 0.8) && rng() < 0.8) trees.push([sgn * (CANAL_X - 1.0 - rng() * 0.8), s + 1.3, 1.05 + rng() * 0.4, BANK_H]);
         trees.push([sgn * (FAR_X + 1 + rng() * 1.5), s + rng() * 2, 1.0 + rng() * 0.4, BANK_H]);
-        if (rng() < 0.5) trees.push([sgn * (FAR_X + 6 + rng() * 20), s + rng() * 4, 1.0 + rng() * 0.5, BANK_H]);
+        if (rng() < 0.3 * dens) trees.push([sgn * (FAR_X + 6 + rng() * 20), s + rng() * 4, 1.0 + rng() * 0.5, BANK_H]);
       }
-      for (let s = s0 + rng() * 4; s < s1; s += 3 + rng() * 4) lilies.push([sgn * (CANAL_X + 0.6 + rng() * (CANAL_W - 1.2)), s, 0.8 + rng() * 0.6, 0.0]);
-      for (let s = s0; s < s1; s += 1.6) reeds.push([sgn * (FAR_X - 0.2 - rng() * 0.4), s, 0.9 + rng() * 0.4, 0]);
+      for (let s = s0 + rng() * 4; s < s1; s += (6 + rng() * 6) / dens) lilies.push([sgn * (CANAL_X + 0.6 + rng() * (CANAL_W - 1.2)), s, 0.8 + rng() * 0.6, 0.0]);
+      for (let s = s0; s < s1; s += 5 / dens) reeds.push([sgn * (FAR_X - 0.2 - rng() * 0.4), s, 0.9 + rng() * 0.4, 0]);
     }
-    const inst = (geo, mat, list, colors, cast) => {
-      if (!geo || !list.length) return;
-      const m = new THREE.InstancedMesh(geo, mat, list.length);
+    const inst = (geo, mat, all, colors, cast) => {
+      if (!geo || !all.length) return;
+      // split into short chunks along the track so off-screen ones are frustum-culled
+      const bins = new Map();
+      for (const it of all) { const k = Math.floor(it[1] / CHUNK); if (!bins.has(k)) bins.set(k, []); bins.get(k).push(it); }
       const M = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), p = new THREE.Vector3(), sc = new THREE.Vector3();
       const c = new THREE.Color();
-      list.forEach(([x, s, k, y], i) => {
-        e.set(0, rng() * 6.28, 0); q.setFromEuler(e);
-        M.compose(p.set(x, y, -s), q, sc.set(k, k, k)); m.setMatrixAt(i, M);
-        if (colors) m.setColorAt(i, c.setHex(colors[(rng() * colors.length) | 0]));
-      });
-      m.castShadow = cast && shadows; m.receiveShadow = false;
-      m.computeBoundingSphere();
-      G.add(m);
+      for (const list of bins.values()) {
+        const m = new THREE.InstancedMesh(geo, mat, list.length);
+        list.forEach(([x, s, k, y], i) => {
+          e.set(0, rng() * 6.28, 0); q.setFromEuler(e);
+          M.compose(p.set(x, y, -s), q, sc.set(k, k, k)); m.setMatrixAt(i, M);
+          if (colors) m.setColorAt(i, c.setHex(colors[(rng() * colors.length) | 0]));
+        });
+        m.castShadow = cast && shadows; m.receiveShadow = false;
+        m.computeBoundingSphere();
+        G.add(m);
+      }
     };
     inst(this.flowers.flowerGeo, this.flowers.flowerMat, flowers, FLOWER_COLORS, false);
     inst(this.flowers.flowerGeo, this.flowers.flowerMat, petals, GARLAND_COLORS, false);
     inst(this.flowers.bushGeo, this.flowers.bushMat, bushes, null, false);
-    inst(this.trees.trunkGeo, this.trees.trunkMat, trees, null, false);
-    inst(this.trees.foliageGeo, this.trees.foliageMat, trees, null, true);
+    inst(this.trees.trunkGeo, this.trees.trunkMat, nearTrees.concat(trees), null, false);
+    const loGeo = this.trees.foliageGeoLo || this.trees.foliageGeo;
+    inst(this.quality === 'low' ? loGeo : this.trees.foliageGeo, this.trees.foliageMat, nearTrees, null, true);
+    inst(loGeo, this.trees.foliageMat, trees, null, false);
     if (this.reeds) inst(this.reeds.geometry, this.reeds.material, reeds, null, false);
     if (this.lilies) inst(this.lilies.geometry, this.lilies.material, lilies, null, false);
 

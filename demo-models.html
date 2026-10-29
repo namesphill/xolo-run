@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<link rel="icon" href="favicon.svg" type="image/svg+xml" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Xolo Run — model viewer</title>
+<style>
+  @font-face { font-family: 'Lilita One'; src: url('fonts/lilita.woff2') format('woff2'); }
+  @font-face { font-family: 'Nunito'; src: url('fonts/nunito.woff2') format('woff2'); font-weight: 200 1000; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #2b1640; font-family: Nunito, sans-serif; }
+  canvas { display: block; }
+  #info { position: fixed; left: 10px; bottom: 10px; color: #fff4de; font: 700 13px Nunito, sans-serif; background: rgba(29,16,41,.6); padding: 6px 10px; border-radius: 8px; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "./js/vendor/three.module.js", "three/addons/": "./js/vendor/" } }
+</script>
+</head>
+<body>
+<div id="info"></div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/OrbitControls.js';
+import GUI from 'three/addons/lil-gui.module.min.js';
+import { MODEL_LIST, preloadModelFonts } from './js/models.js';
+
+const qs = new URLSearchParams(location.search);
+await preloadModelFonts();
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+// warm golden-hour sky dome (also used for the PMREM environment)
+const skyMat = new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false,
+  uniforms: { top: { value: new THREE.Color('#5a3a8a') }, mid: { value: new THREE.Color('#ff9a5a') }, bot: { value: new THREE.Color('#ffd9a0') } },
+  vertexShader: 'varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.); }',
+  fragmentShader: 'uniform vec3 top, mid, bot; varying vec3 vP; void main(){ float h=vP.y; vec3 c = h>0.0 ? mix(mid, top, pow(h,0.6)) : mix(mid, bot, min(1.,-h*3.)); float sun = pow(max(0.,dot(vP, normalize(vec3(0.6,0.25,-0.75)))), 64.); gl_FragColor = vec4(c + vec3(1.,.8,.5)*sun*2., 1.); }',
+});
+const sky = new THREE.Mesh(new THREE.SphereGeometry(400, 32, 16), skyMat);
+scene.add(sky);
+const pm = new THREE.PMREMGenerator(renderer);
+const envScene = new THREE.Scene(); envScene.add(new THREE.Mesh(new THREE.SphereGeometry(10, 32, 16), skyMat));
+scene.environment = pm.fromScene(envScene, 0.02).texture;
+
+scene.add(new THREE.HemisphereLight('#ffd7a8', '#3a5a40', 0.9));
+const sun = new THREE.DirectionalLight('#ffc98a', 2.6);
+sun.position.set(18, 22, 14); sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -40, right: 40, top: 40, bottom: -40, far: 120 });
+scene.add(sun);
+
+const water = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshStandardMaterial({ color: '#1f6b62', roughness: 0.12, metalness: 0.1, transparent: true, opacity: 0.8 }));
+water.rotation.x = -Math.PI / 2; water.receiveShadow = true; scene.add(water);
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.05, 1000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+const bankMat = new THREE.MeshStandardMaterial({ color: '#5d7a2e', roughness: 0.95 });
+const boxMat = new THREE.LineBasicMaterial({ color: '#ffef3a', depthTest: false, transparent: true });
+function boxLines(b) {
+  const g = new THREE.BoxGeometry(b.maxX - b.minX, b.maxY - b.minY, b.maxZ - b.minZ);
+  const l = new THREE.LineSegments(new THREE.EdgesGeometry(g), boxMat);
+  l.position.set((b.maxX + b.minX) / 2, (b.maxY + b.minY) / 2, (b.maxZ + b.minZ) / 2); l.renderOrder = 10;
+  return l;
+}
+function holder(item) {
+  const h = new THREE.Group();
+  const m = item.make(); h.add(m);
+  if (item.base === 'bank') { m.position.y = 0.7; const pad = new THREE.Mesh(new THREE.BoxGeometry(5, 1.2, 5), bankMat); pad.position.y = 0.1; pad.receiveShadow = true; h.add(pad); }
+  if (item.box) { const l = boxLines(item.box); l.name = 'box'; h.add(l); }
+  m.updateMatrixWorld(true);
+  h.userData.model = m;
+  return h;
+}
+
+// grid of every model
+const grid = new THREE.Group(); scene.add(grid);
+const cells = [];
+let x = 0, z = 0, rowDepth = 0, rowW = 0; const MAXW = 40;
+for (const item of MODEL_LIST) {
+  const h = holder(item);
+  const bb = new THREE.Box3().setFromObject(h.userData.model);
+  const w = Math.max(2.4, bb.max.x - bb.min.x) + 1.6, d = Math.max(2.4, bb.max.z - bb.min.z) + 1.6;
+  if (x + w > MAXW) { x = 0; z -= rowDepth; rowDepth = 0; }
+  h.position.set(x + w / 2 - MAXW / 2, 0, z - d / 2);
+  x += w; rowDepth = Math.max(rowDepth, d);
+  grid.add(h); cells.push(h);
+}
+const focusGroup = new THREE.Group(); scene.add(focusGroup);
+
+const params = { focus: qs.get('focus') || 'All', boxes: qs.get('boxes') !== '0', turntable: qs.get('spin') === '1' };
+function setBoxes() { scene.traverse((o) => { if (o.name === 'box') o.visible = params.boxes; }); }
+function frame(obj, az = 35, el = 22, distMul = 1) {
+  const bb = new THREE.Box3().setFromObject(obj), c = bb.getCenter(new THREE.Vector3()), s = bb.getSize(new THREE.Vector3()).length();
+  const r = s * 1.5 * distMul, a = THREE.MathUtils.degToRad(az), e = THREE.MathUtils.degToRad(el);
+  controls.target.copy(c);
+  camera.position.set(c.x + r * Math.sin(a) * Math.cos(e), c.y + r * Math.sin(e), c.z + r * Math.cos(a) * Math.cos(e));
+  controls.update();
+}
+function setFocus() {
+  focusGroup.clear();
+  const az = +(qs.get('az') ?? 35), el = +(qs.get('el') ?? 22), dm = +(qs.get('dist') ?? 1);
+  if (params.focus === 'All') { grid.visible = true; frame(grid, az, el + 15, dm * 0.75); }
+  else {
+    grid.visible = false;
+    const item = MODEL_LIST.find((m) => m.id === params.focus);
+    const h = holder(item); focusGroup.add(h); frame(h.userData.model, az, el, dm);
+  }
+  setBoxes();
+}
+const gui = new GUI({ title: 'Xolo Run models' });
+gui.add(params, 'focus', ['All', ...MODEL_LIST.map((m) => m.id)]).onChange(setFocus);
+gui.add(params, 'boxes').name('collision boxes').onChange(setBoxes);
+gui.add(params, 'turntable');
+setFocus();
+
+const info = document.getElementById('info');
+const clock = new THREE.Clock();
+renderer.setAnimationLoop(() => {
+  const t = clock.getElapsedTime(), dt = clock.getDelta();
+  if (params.turntable) (grid.visible ? cells.map((c) => c.userData.model) : focusGroup.children.map((c) => c.userData.model)).forEach((m) => (m.rotation.y += 0.008));
+  scene.traverse((o) => o.userData.update && o.userData.update(t));
+  controls.update();
+  renderer.render(scene, camera);
+  info.textContent = `${params.focus} · draw calls ${renderer.info.render.calls} · tris ${(renderer.info.render.triangles / 1000).toFixed(1)}k`;
+});
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+window.__ready = true;
+</script>
+</body>
+</html>

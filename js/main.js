@@ -6,6 +6,7 @@ import { createWorld } from './world.js';
 import { createXolo } from './xolo.js';
 import { AudioFX } from './audio.js';
 import { Track } from './track.js';
+import { preloadModelFonts } from './models.js';
 
 const $ = (id) => document.getElementById(id);
 const ui = {
@@ -38,7 +39,7 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 setMaxAnisotropy(Math.min(8, renderer.capabilities.getMaxAnisotropy()));
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 400);
+const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 230);
 const world = createWorld(renderer, scene, { quality });
 const xolo = createXolo({ envMapIntensity: 0.65 });
 xolo.setShadow(quality === 'high');
@@ -48,6 +49,7 @@ xolo.onFootfall = (pos) => { lastFootfall = time; if (state === 'play' && player
 xolo.root.scale.setScalar(XOLO_SCALE);
 scene.add(xolo.root);
 const audio = new AudioFX();
+await preloadModelFonts();
 const track = new Track(scene, world, { quality });
 
 // ---------------- state ----------------
@@ -322,4 +324,4 @@ requestAnimationFrame((t) => { last = t; frame(t); });
 setTimeout(() => { ui.loading.classList.add('fade'); setTimeout(() => show(ui.loading, false), 600); }, 150);
 
 // debug/testing hooks
-window.__xolo = { get state() { return state; }, get player() { return player; }, get skulls() { return skulls; }, track, startRun, input };
+window.__xolo = { get state() { return state; }, get player() { return player; }, get skulls() { return skulls; }, track, startRun, input, renderer, scene, camera };
