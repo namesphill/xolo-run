@@ -13,11 +13,14 @@ const smooth = (t) => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
 
 export const XOLO_DEFAULTS = {
   skinColor: '#1c1c21',
-  roughness: 0.3,
+  roughness: 0.26,
   clearcoat: 0.8,
   clearcoatRoughness: 0.2,
   envMapIntensity: 1.0,
-  innerEarColor: '#e3909b',
+  innerEarColor: '#f7aeb6',
+  rimColor: '#ff9a4d',   // warm fresnel rim so the black silhouette separates from the path
+  rimStrength: 0.26,
+  rimPower: 3.4,
   eyeColor: '#ffa514',
   earScale: 1,
   headScale: 1,
@@ -99,7 +102,7 @@ function ellipsoid(rx, ry, rz, ws = 12, hs = 8) {
 // Large bat ear: cupped shell opening toward -Z, base at origin, extends +Y.
 function earGeos(H, W, cup, thick) {
   const NU = 10, NV = 9;
-  const wAt = (u) => W * Math.pow(Math.max(0, Math.sin(Math.PI * (0.2 + 0.8 * u))), 0.75);
+  const wAt = (u) => W * Math.pow(Math.max(0, Math.sin(Math.PI * (0.16 + 0.84 * u))), 0.6);
   const front = (u, v) => [
     wAt(u) * v,
     u * H,
@@ -125,10 +128,13 @@ function earGeos(H, W, cup, thick) {
   }, false);
   const outer = mergeGeometries([fr, bk]);
   const inner = grid((u, v) => {
-    const uu = 0.07 + u * 0.8, vv = v * 0.74;
+    const uu = 0.05 + u * 0.86, vv = v * 0.84;
     const p = front(uu, vv); p[2] -= 0.003; return p;
   }, true);
-  return { outer, inner };
+  // thin pink lip wrapping onto the back edge so the ear reads from behind
+  const backAt = (u, v) => { const p = front(u, v); p[2] += thick * Math.sqrt(Math.max(0, 1 - v * v)) * (1 - 0.7 * u) + 0.0025; return p; };
+  const lips = [-1, 1].map((sd) => grid((u, v) => backAt(0.04 + u * 0.9, sd * (0.84 + 0.15 * (v + 1) / 2)), sd < 0));
+  return { outer, inner: mergeGeometries([inner, ...lips]) };
 }
 
 // Cempasúchil pom-pom: ruffled, slightly flattened along +Z (its face).
@@ -145,7 +151,7 @@ function marigold(r, hex) {
     const ridge = Math.abs(Math.sin(ang * 5 + v.z * 7));
     const f = Math.sin(v.x * 9 + 1.3) * Math.sin(v.y * 10 + 0.7) * Math.sin(v.z * 8 + 2.1);
     const rr = 1 + 0.13 * f + 0.12 * ridge;
-    const zf = v.z < 0 ? 0.55 : 0.82;
+    const zf = v.z < 0 ? 0.62 : 0.9;
     p.setXYZ(i, v.x * rr * r, v.y * rr * r, v.z * rr * r * zf);
     const t = clamp(0.35 + 0.5 * ridge + 0.4 * f, 0, 1);
     c.copy(deep).lerp(main, t).lerp(tip, Math.max(0, f) * 0.35);
@@ -252,12 +258,30 @@ export function createXolo(params = {}) {
     new THREE.MeshPhysicalMaterial({ vertexColors: true, roughness: 0.15, clearcoat: 1, clearcoatRoughness: 0.03, metalness: 0 }), // 2 eyes
     new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, metalness: 0, emissive: new THREE.Color('#3a1200') }), // 3 garland
   ];
+  const rimU = { rimColor: { value: new THREE.Color() }, rimPower: { value: 2.6 } };
+  mats[0].onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, rimU);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform vec3 rimColor;\nuniform float rimPower;')
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+      {
+        float rimF = pow(1.0 - saturate(dot(normal, normalize(vViewPosition))), rimPower);
+        vec3 upV = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+        rimF *= 0.45 + 0.55 * saturate(dot(normal, upV) + 0.35);
+        totalEmissiveRadiance += rimColor * rimF;
+      }`);
+  };
+  mats[0].customProgramCacheKey = () => 'xolo-skin-rim';
+  mats[1].emissive = new THREE.Color();
   function applyMaterials() {
     const m = mats[0];
+    rimU.rimColor.value.set(P.rimColor).multiplyScalar(P.rimStrength);
+    rimU.rimPower.value = P.rimPower;
     m.color.set(P.skinColor); m.roughness = P.roughness; m.clearcoat = P.clearcoat;
     m.clearcoatRoughness = P.clearcoatRoughness;
     for (const mm of mats) mm.envMapIntensity = P.envMapIntensity;
     mats[1].color.set(P.innerEarColor);
+    mats[1].emissive.set(P.innerEarColor).multiplyScalar(0.16);
     mats[2].color.set(P.eyeColor);
   }
 
@@ -285,7 +309,7 @@ export function createXolo(params = {}) {
     const nd = new THREE.Vector3(0, Math.cos(L.neckTilt), -Math.sin(L.neckTilt));
     const head = mk('head', neck, 0, nd.y * L.neckLen, nd.z * L.neckLen, 'YXZ');
     const jaw = mk('jaw', head, 0, -0.02 * HS, -0.04 * HS);
-    const ears = [-1, 1].map((side) => ({ side, bone: mk('ear' + side, head, side * 0.05 * HS, 0.072 * HS, 0.012 * HS, 'YXZ') }));
+    const ears = [-1, 1].map((side) => ({ side, bone: mk('ear' + side, head, side * 0.054 * HS, 0.072 * HS, 0.012 * HS, 'YXZ') }));
 
     const legs = [];
     for (const front of [true, false]) for (const side of [-1, 1]) {
@@ -316,8 +340,9 @@ export function createXolo(params = {}) {
     const pieces = [];
     const add = (geo, bone, group, color = 1, skinFn = null) => pieces.push({ geo, bone, group, color, skinFn });
     const shift = (secs, o) => secs.map((s) => ({ ...s, z: s.z - o[2], y: (s.y || 0) - o[1] }));
-    add(loft(shift(CHEST, L.chest), 16), chestShape, 0);
-    add(loft(shift(HIP, L.hips), 16), hipShape, 0);
+    const vol = (secs, fw, fh) => secs.map((q) => (q.w > 0.03 ? { ...q, w: q.w * fw, h: q.h * fh } : q));
+    add(loft(shift(vol(CHEST, 1.08, 1.06), L.chest), 18), chestShape, 0);
+    add(loft(shift(vol(HIP, 1.12, 1.07), L.hips), 18), hipShape, 0);
 
     // neck
     const neckG = loft([
@@ -360,13 +385,13 @@ export function createXolo(params = {}) {
       }
     }
     // ears
-    const eg = earGeos(0.26 * ES, 0.085 * ES, 0.03 * ES, 0.018 * ES);
+    const eg = earGeos(0.315 * ES, 0.118 * ES, 0.036 * ES, 0.02 * ES);
     for (const e of ears) { add(hs(eg.outer.clone()), e.bone, 0); add(hs(eg.inner.clone()), e.bone, 1); }
 
     // collar garland (neck-local ring around neck base)
     if (P.collar) {
       const e1 = new THREE.Vector3(1, 0, 0), e2 = new THREE.Vector3(0, Math.sin(L.neckTilt), Math.cos(L.neckTilt));
-      const c0 = nd.clone().multiplyScalar(0.04), R = 0.094, N = 12, Z = new THREE.Vector3(0, 0, 1);
+      const c0 = nd.clone().multiplyScalar(0.04), R = 0.102, N = 12, Z = new THREE.Vector3(0, 0, 1);
       const cols = ['#ff8a00', '#ffa21a', '#ff7000'];
       const q = new THREE.Quaternion(), m4 = new THREE.Matrix4(), one = new THREE.Vector3(1, 1, 1);
       const flowers = [];
@@ -374,14 +399,14 @@ export function createXolo(params = {}) {
         const a = -Math.PI / 2 + (k / N) * TAU;
         const nrm = e1.clone().multiplyScalar(Math.cos(a)).addScaledVector(e2, Math.sin(a));
         const big = k === 0 ? 1.3 : 1;
-        const g = marigold(0.043 * big, cols[k % 3]);
+        const g = marigold(0.054 * big, cols[k % 3]);
         q.setFromUnitVectors(Z, nrm);
         m4.compose(c0.clone().addScaledVector(nrm, R * (k === 0 ? 1.12 : 1)), q, one);
         g.applyMatrix4(m4); flowers.push(g);
         // leaf between flowers
         const a2 = a + Math.PI / N;
         const n2 = e1.clone().multiplyScalar(Math.cos(a2)).addScaledVector(e2, Math.sin(a2));
-        const leaf = ellipsoid(0.016, 0.005, 0.034, 8, 5);
+        const leaf = ellipsoid(0.019, 0.006, 0.04, 8, 5);
         leaf.translate(0, 0, 0.02);
         const lc = new THREE.Color(k % 2 ? '#3d8a26' : '#2f7020');
         leaf.setAttribute('color', new THREE.Float32BufferAttribute(new Array(leaf.attributes.position.count).fill(0).flatMap(() => [lc.r, lc.g, lc.b]), 3));
@@ -389,7 +414,7 @@ export function createXolo(params = {}) {
         m4.compose(c0.clone().addScaledVector(n2, R * 0.95), q, one);
         leaf.applyMatrix4(m4); flowers.push(leaf);
       }
-      const rib = new THREE.TorusGeometry(R * 0.86, 0.013, 6, 28); rib.deleteAttribute('uv');
+      const rib = new THREE.TorusGeometry(R * 0.86, 0.017, 6, 28); rib.deleteAttribute('uv');
       const rc = new THREE.Color('#e8177d');
       rib.setAttribute('color', new THREE.Float32BufferAttribute(new Array(rib.attributes.position.count).fill(0).flatMap(() => [rc.r, rc.g, rc.b]), 3));
       q.setFromUnitVectors(Z, nd); rib.applyQuaternion(q); rib.translate(c0.x, c0.y, c0.z);
@@ -398,20 +423,44 @@ export function createXolo(params = {}) {
       add(mergeGeometries(flowers.map((f) => (f.index ? f.toNonIndexed() : f))), neck, 3, 1);
     }
 
-    // legs
+    // legs: one continuous tapered tube per leg, skin-blended across the joints
     for (const leg of legs) {
-      const [L1, L2, L3] = leg.L;
-      if (leg.front) {
-        add(limb(L1, 0.048, 0.03, 0.8), leg.upper, 0);
-        add(limb(L2, 0.027, 0.021), leg.mid, 0);
-        add(limb(L3, 0.021, 0.019), leg.foot, 0);
-      } else {
-        const th = limb(L1, 0.07, 0.036, 0.74); th.translate(0, 0, -0.006);
-        add(th, leg.upper, 0);
-        add(limb(L2, 0.032, 0.021), leg.mid, 0);
-        add(limb(L3, 0.02, 0.018), leg.foot, 0);
+      const [L1, L2, L3] = leg.L, J1 = L1, J2 = L1 + L2, J3 = J2 + L3;
+      // [distance down the leg, radius, width scale, forward offset]
+      const prof = leg.front
+        ? [[0, 0.056, 0.8, 0], [0.07, 0.05, 0.8, 0], [J1 * 0.75, 0.034, 0.88, 0], [J1, 0.028, 0.95, 0],
+           [J1 + L2 * 0.5, 0.024, 1, 0], [J2, 0.02, 1, 0], [J3, 0.0185, 1, 0]]
+        : [[0, 0.078, 0.74, -0.008], [0.06, 0.074, 0.74, -0.01], [J1 * 0.6, 0.052, 0.8, -0.006], [J1, 0.03, 0.92, 0],
+           [J1 + L2 * 0.35, 0.026, 1, 0], [J2, 0.019, 1, 0], [J3, 0.017, 1, 0]];
+      const at = (d) => {
+        let i = 0; while (i < prof.length - 2 && d > prof[i + 1][0]) i++;
+        const a = prof[i], b = prof[i + 1], t = smooth((d - a[0]) / (b[0] - a[0]));
+        return [lerp(a[1], b[1], t), lerp(a[2], b[2], t), lerp(a[3], b[3], t)];
+      };
+      const secs = [], r0 = prof[0][1];
+      for (let i = 0; i <= 3; i++) {
+        const t = 0.2 + (i / 3) * (Math.PI / 2 - 0.2), r = r0 * Math.sin(t);
+        secs.push({ z: -r0 * Math.cos(t), w: r * prof[0][2], h: r, y: prof[0][3] });
       }
-      const paw = ellipsoid(0.029, 0.023, 0.042, 10, 6); paw.translate(0, 0.022, -0.016);
+      const NS = 22;
+      for (let i = 1; i <= NS; i++) {
+        const d = (i / NS) * J3, [r, sx, off] = at(d);
+        secs.push({ z: d, w: r * sx, h: r, y: off });
+      }
+      secs.push({ z: J3 + 0.012, w: 0.008, h: 0.008 });
+      const tube = loft(secs, 12); tube.rotateX(Math.PI / 2);
+      const bi = [leg.upper, leg.mid, leg.foot, leg.paw].map((b) => bones.indexOf(b));
+      const joints = [[J1, 0.04], [J2, 0.03], [J3, 0.018]];
+      add(tube, leg.upper, 0, 1, (p) => {
+        const d = -p.y;
+        for (let j = 0; j < 3; j++) {
+          const [J, b] = joints[j];
+          if (d < J - b) return [bi[j], bi[j + 1], 1, 0];
+          if (d < J + b) { const t = smooth((d - J + b) / (2 * b)); return [bi[j], bi[j + 1], 1 - t, t]; }
+        }
+        return [bi[3], bi[2], 1, 0];
+      });
+      const paw = ellipsoid(0.03, 0.023, 0.044, 10, 6); paw.translate(0, 0.022, -0.017);
       add(paw, leg.paw, 0);
     }
 
@@ -666,8 +715,8 @@ export function createXolo(params = {}) {
     R.ears.forEach((e, i) => {
       const s = e.side, ss = sp.ears[i];
       e.bone.rotation.x = clamp(ss.p.x, -0.5, 1.4);
-      e.bone.rotation.y = -s * 0.28;
-      e.bone.rotation.z = -s * (0.26 + clamp(ss.r.x, -0.6, 1.2));
+      e.bone.rotation.y = -s * 0.6;
+      e.bone.rotation.z = -s * (0.34 + clamp(ss.r.x, -0.6, 1.2));
     });
 
     // ---- tail

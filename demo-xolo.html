@@ -141,6 +141,9 @@ fp.add(P, 'clearcoatRoughness', 0, 1, 0.01).onChange(() => xolo.applyMaterials()
 fp.add(P, 'envMapIntensity', 0, 3, 0.05).onChange(() => xolo.applyMaterials());
 fp.addColor(P, 'eyeColor').onChange(() => xolo.applyMaterials());
 fp.addColor(P, 'innerEarColor').onChange(() => xolo.applyMaterials());
+fp.addColor(P, 'rimColor').onChange(() => xolo.applyMaterials());
+fp.add(P, 'rimStrength', 0, 1.5, 0.01).onChange(() => xolo.applyMaterials());
+fp.add(P, 'rimPower', 1, 6, 0.1).onChange(() => xolo.applyMaterials());
 fp.add(P, 'earScale', 0.6, 1.5, 0.01).onChange(rb);
 fp.add(P, 'headScale', 0.7, 1.4, 0.01).onChange(rb);
 fp.add(P, 'legLength', 0.7, 1.4, 0.01).onChange(rb);
