@@ -128,11 +128,11 @@ function die(ev) {
   if (ev.cause === 'splash') {
     world.burst(new THREE.Vector3(player.x, 0.05, -player.s), { kind: 'splash', count: 50 });
     world.splash?.(new THREE.Vector3(player.x, 0, -player.s), 1);
-    ui.oTitle.textContent = '¡Remolino!'; ui.oSub.textContent = 'Glub glub! The whirlpool pulled your xolo under. Jump over dark water.';
+    ui.oTitle.textContent = '¡Xolo al remolino!'; ui.oSub.textContent = 'The whirlpool pulled your xolo under. Jump over the swirling water.';
   } else {
     shake = 0.6;
     world.burst(new THREE.Vector3(player.x, player.y + 0.6, -player.s - 0.4), { kind: 'dust', count: 26 });
-    ui.oTitle.textContent = '¡Ay, chihuahua!'; ui.oSub.textContent = `Bonk! Straight into a ${KIND_NAMES[ev.kind] || 'obstacle'}.`;
+    ui.oTitle.textContent = '¡Xolo K.O.!'; ui.oSub.textContent = `Your xolo ran straight into a ${KIND_NAMES[ev.kind] || 'obstacle'}.`;
   }
 }
 function gameOver() {
