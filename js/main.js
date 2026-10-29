@@ -43,6 +43,8 @@ const world = createWorld(renderer, scene, { quality });
 const xolo = createXolo();
 xolo.setShadow(quality === 'high');
 const XOLO_SCALE = 1.2;
+let stepT = 0, lastFootfall = -9;
+xolo.onFootfall = (pos) => { lastFootfall = time; if (state === 'play' && player.grounded && player.support === 'land') world.splash?.(pos, 0.25); };
 xolo.root.scale.setScalar(XOLO_SCALE);
 scene.add(xolo.root);
 const audio = new AudioFX();
@@ -50,6 +52,7 @@ const track = new Track(scene, world, { quality });
 
 // ---------------- state ----------------
 const BEST_KEY = 'xolo.best';
+const tmpF = new THREE.Vector3();
 let best = Number(localStorage.getItem(BEST_KEY) || 0);
 let state = 'menu';      // menu | play | paused | dying | over
 let player = newPlayer();
@@ -109,8 +112,9 @@ function die(ev) {
   audio.sfx(ev.cause === 'splash' ? 'splash' : 'crash');
   audio.stopMusic();
   if (ev.cause === 'splash') {
-    world.burst(new THREE.Vector3(player.x, WATER_Y + 0.05, -player.s), { kind: 'splash', count: 50 });
-    ui.oTitle.textContent = '¡Al agua!'; ui.oSub.textContent = 'Splash! Xolos are better runners than swimmers.';
+    world.burst(new THREE.Vector3(player.x, 0.05, -player.s), { kind: 'splash', count: 50 });
+    world.splash?.(new THREE.Vector3(player.x, 0, -player.s), 1);
+    ui.oTitle.textContent = '¡Remolino!'; ui.oSub.textContent = 'Glub glub! The whirlpool pulled your xolo under. Jump over dark water.';
   } else {
     shake = 0.6;
     world.burst(new THREE.Vector3(player.x, player.y + 0.6, -player.s - 0.4), { kind: 'dust', count: 26 });
@@ -233,7 +237,8 @@ function simStep() {
     else if (ev.type === 'land') {
       const st = Math.min(1, Math.abs(ev.vy) / 14);
       xolo.onLand(st); audio.sfx('land', { strength: st });
-      world.burst(new THREE.Vector3(player.x, player.y + 0.05, -player.s), { kind: 'dust', count: 6 + Math.round(st * 10), colors: ev.on === 'land' ? [0xc99561, 0xa87449, 0xffb020] : [0xffd27a, 0xffffff] });
+      if (ev.on === 'land') world.splash?.(new THREE.Vector3(player.x, 0, -player.s), 0.4 + st);
+      world.burst(new THREE.Vector3(player.x, player.y + 0.05, -player.s), { kind: ev.on === 'land' ? 'splash' : 'dust', count: 6 + Math.round(st * 10), colors: ev.on === 'land' ? [0xdff8ff, 0x9fe3e0, 0xffffff] : [0xffd27a, 0xffffff] });
       shake = Math.max(shake, st * 0.12);
     } else if (ev.type === 'stumble') { xolo.onStumble(ev.dir); audio.sfx('stumble'); shake = 0.3; }
     else if (ev.type === 'dead') { die(ev); return; }
@@ -292,6 +297,10 @@ function frame(now) {
       speed: state === 'play' ? speedAt(player.s) : 0,
       grounded: player.grounded, vy: player.vy, lateral: state === 'play' ? lateral : 0,
     });
+    if (state === 'play' && player.grounded && player.support === 'land' && time - lastFootfall > 1) {
+      stepT -= dt;
+      if (stepT <= 0) { stepT = 0.16; world.splash?.(tmpF.set(renderP.x + (Math.random() - 0.5) * 0.3, 0, -renderP.s - 0.3), 0.22); }
+    }
     world.update(dt, time, xolo.root.position, camera);
     updateCamera(dt);
   }

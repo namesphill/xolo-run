@@ -4,15 +4,19 @@ import * as THREE from 'three';
 import { Planner } from './planner.js';
 import { boatLayout, crosserX } from './physics.js';
 import { LANE_W, laneX, WATER_Y } from './config.js';
-import { pathTexture, grassTexture, bankTexture, woodTexture, PALETTES } from './textures.js';
+import { grassTexture, bankTexture, woodTexture, PALETTES } from './textures.js';
+import * as Models from './models.js';
 import { makeObstacle, makeTrajinera, makeSkullAssets, makeTreeAssets, makeFlowerAssets, makeFlowerArch, makePapelString, makeHouse } from './models.js';
 
 const EDGE = LANE_W * 1.5;      // outer edge of the lanes (3.3)
-const SIDE_W = 9.2;             // chinampa width beside the lanes
+const BANK_IN = EDGE + 0.45;    // chinampa edge (reeds/lilies grow in the margin)
+const BANK_H = 0.7;             // chinampa top above the water
+const ARCH_W = BANK_IN * 2 + 0.6;
+const SIDE_W = 6.5;             // chinampa width beside the canal
 const CANAL_X = EDGE + SIDE_W;  // side canal starts here
 const CANAL_W = 6;
 const FAR_X = CANAL_X + CANAL_W;
-const BOTTOM = -1.5;
+const BOTTOM = -1.2;
 const AHEAD = 230, BEHIND = 40;
 
 // Small geometry builder with world-space UVs (one draw call per material per section).
@@ -69,7 +73,52 @@ function intersect(A, B) {
   return out;
 }
 
-const FLOWER_COLORS = [0xff8c12, 0xffa31a, 0xff7a00, 0xffc21f, 0xff9a1f, 0xe8177d, 0xffb52e];
+const FLOWER_COLORS = [0xff8c12, 0xffa31a, 0xff6a00, 0xffc21f, 0xe8177d, 0xd81b2c, 0xff3d7f, 0x9b30d9, 0xffb52e];
+const GARLAND_COLORS = [0xff8c12, 0xffa31a, 0xff6a00, 0xffc21f, 0xd81b2c];
+
+// Deadly water: mode 0 = whirlpool spanning the canal, mode 1 = dark rushing current in one lane.
+function makeHazardMaterial() {
+  return new THREE.ShaderMaterial({
+    fog: true,
+    uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTime: { value: 0 }, uSize: { value: new THREE.Vector2(6, 6) }, uMode: { value: 0 } }]),
+    vertexShader: `#include <common>
+#include <fog_pars_vertex>
+varying vec2 vP;
+uniform vec2 uSize;
+void main(){ vP = (uv - 0.5) * uSize; vec4 mvPosition = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mvPosition;
+#include <fog_vertex>
+}`,
+    fragmentShader: `#include <common>
+#include <fog_pars_fragment>
+uniform float uTime; uniform vec2 uSize; uniform float uMode;
+varying vec2 vP;
+void main(){
+  vec3 deep = vec3(0.01, 0.06, 0.10), mid = vec3(0.03, 0.26, 0.33), foam = vec3(0.86, 0.98, 1.0);
+  vec3 c;
+  vec2 h = uSize * 0.5;
+  if (uMode < 0.5) {
+    vec2 q = vP / h; float r = length(q); float a = atan(q.y, q.x);
+    float sw = sin(a * 3.0 + log(r + 0.05) * 7.0 + uTime * 5.0);
+    float sw2 = sin(a * 5.0 + r * 14.0 + uTime * 3.0);
+    c = mix(deep, mid, smoothstep(0.05, 1.1, r));
+    c = mix(c, foam, smoothstep(0.6, 1.0, sw) * 0.5 * smoothstep(0.08, 0.6, r));
+    c = mix(c, foam * 0.8, smoothstep(0.8, 1.0, sw2) * 0.25);
+  } else {
+    float flow = vP.y + uTime * 7.0;
+    float st = sin(flow * 1.7 + sin(vP.x * 4.0 + vP.y * 0.3) * 1.4) * sin(flow * 0.6 + vP.x * 2.0);
+    c = mix(deep, mid, 0.45 + 0.25 * sin(vP.x * 3.0 + flow * 0.4));
+    c = mix(c, foam, smoothstep(0.7, 1.0, st) * 0.45);
+  }
+  vec2 e = 1.0 - abs(vP) / h;
+  float edge = 1.0 - smoothstep(0.0, 0.45 / max(h.x, 0.5) + 0.06, min(e.x * h.x, e.y * h.y) / max(h.x, 0.5));
+  c = mix(c, foam, edge * 0.7);
+  gl_FragColor = vec4(c, 1.0);
+#include <tonemapping_fragment>
+#include <colorspace_fragment>
+#include <fog_fragment>
+}`,
+  });
+}
 
 export class Track {
   constructor(scene, world, { quality = 'high' } = {}) {
@@ -77,13 +126,15 @@ export class Track {
     this.root = new THREE.Group(); scene.add(this.root);
     const tex = (t, rx = 1, ry = 1) => { const c = t.clone(); c.repeat.set(rx, ry); c.needsUpdate = true; return c; };
     this.mat = {
-      path: new THREE.MeshStandardMaterial({ map: tex(pathTexture(), 1 / LANE_W, 1 / 4.4), roughness: 0.95 }),
       grass: new THREE.MeshStandardMaterial({ map: tex(grassTexture(), 1 / 4, 1 / 4), roughness: 1 }),
       bank: new THREE.MeshStandardMaterial({ map: bankTexture(), roughness: 1 }),
       wood: new THREE.MeshStandardMaterial({ map: tex(woodTexture(), 1 / 2.2, 1 / 2.2), roughness: 0.8 }),
       stone: new THREE.MeshStandardMaterial({ color: 0xe6d3ad, roughness: 0.9 }),
-      ford: world.makeFordWaterMaterial(),
     };
+    this.hazardMat = makeHazardMaterial();
+    this.hazardTime = { value: 0 };
+    this.reeds = Models.makeReedAssets ? Models.makeReedAssets() : null;
+    this.lilies = Models.makeLilyAssets ? Models.makeLilyAssets() : null;
     this.skullAssets = makeSkullAssets();
     this.trees = makeTreeAssets();
     this.flowers = makeFlowerAssets();
@@ -107,6 +158,7 @@ export class Track {
   }
 
   update(playerS, time) {
+    this.hazardTime.value = time;
     while (this.planner.cursor < playerS + AHEAD) { const sec = this.planner.next(); this.sections.push(sec); this.buildSection(sec); }
     while (this.sections.length && this.sections[0].end < playerS - BEHIND) this.disposeSection(this.sections.shift());
     for (const sec of this.sections) {
@@ -200,7 +252,7 @@ export class Track {
   buildSection(sec) {
     const G = new THREE.Group();
     const owned = [];
-    const vis = { group: G, owned, boats: [], crossers: [], drifters: [], papel: [] };
+    const vis = { group: G, owned, boats: [], crossers: [], drifters: [], papel: [], hazards: [] };
     sec.vis = vis;
     const shadows = this.quality === 'high';
     const addGeo = (builder, mat, recv = true) => {
@@ -209,96 +261,93 @@ export class Track {
     };
     const Z = (s) => -s;
     const s0 = sec.type === 'warmup' ? sec.start - 40 : sec.start, s1 = sec.end;
-    const fords = sec.ford;
+    const rng = mulberry(sec.id * 7919 + 13);
 
-    // ---- lanes ----
-    const top = new GeoBuilder(), bank = new GeoBuilder(), stone = new GeoBuilder(), wood = new GeoBuilder(), fordW = new GeoBuilder();
+    // ---- lanes: the canal itself. Walkable water is the world water plane; deadly water gets overlays ----
     const laneLand = [];
-    for (let l = 0; l < 3; l++) {
-      const cx = laneX(l), x0 = cx - LANE_W / 2, x1 = cx + LANE_W / 2;
-      const land = sec.land[l].map(([a, b]) => [Math.max(a, s0), Math.min(b, s1)]).filter(([a, b]) => b > a);
-      laneLand.push(land);
-      for (const [a, b] of subtract(land, fords)) {
-        top.top(x0, x1, Z(b), Z(a), 0, (x, z) => [x - x0, z]);
-        bank.sides(x0, x1, Z(b), Z(a), BOTTOM, 0, 4, 'fb');
-      }
-    }
-    // canal lane walls facing water need both side faces: emit explicit walls where neighbour lane is water
+    for (let l = 0; l < 3; l++) laneLand.push(sec.land[l].map(([a, b]) => [Math.max(a, s0), Math.min(b, s1)]).filter(([a, b]) => b > a));
+    const deadly = laneLand.map((land) => subtract([[s0, s1]], land));
+    const allDead = intersect(intersect(deadly[0], deadly[1]), deadly[2]);
+    const hazard = (x0, x1, a, b, mode) => {
+      const geo = new THREE.PlaneGeometry(x1 - x0, b - a, 1, 1).rotateX(-Math.PI / 2);
+      geo.translate(0, 0, 0);
+      owned.push(geo);
+      const mat = this.hazardMat.clone();
+      mat.uniforms.uTime = this.hazardTime; mat.uniforms.uSize = { value: new THREE.Vector2(x1 - x0, b - a) }; mat.uniforms.uMode = { value: mode };
+      owned.push(mat);
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set((x0 + x1) / 2, 0.012, -(a + b) / 2);
+      m.renderOrder = 1;
+      G.add(m); vis.hazards.push(m);
+    };
+    for (const [a, b] of allDead) hazard(-EDGE + 0.05, EDGE - 0.05, a, b, 0);
     for (let l = 0; l < 3; l++) {
       const cx = laneX(l);
-      for (const nb of [l - 1, l + 1]) {
-        if (nb < 0 || nb > 2) continue;
-        const water = subtract(laneLand[l], laneLand[nb]);
-        const xw = nb < l ? cx - LANE_W / 2 : cx + LANE_W / 2;
-        for (const [a, b] of water) bank.sides(xw - 0.001, xw + 0.001, Z(b), Z(a), BOTTOM, 0, 4, nb < l ? 'l' : 'r');
-      }
+      for (const [a, b] of subtract(deadly[l], allDead)) hazard(cx - LANE_W / 2 + 0.04, cx + LANE_W / 2 - 0.04, a, b, 1);
     }
-    // lane dividers: low stone kerbs where both lanes are solid path
-    const dashes = (x, iv) => { for (const [a, b] of iv) for (let s = a + 0.4; s < b - 0.4; s += 1.6) stone.box(x - 0.07, x + 0.07, 0, 0.05, Z(Math.min(b, s + 1.0)), Z(s)); };
-    dashes(-LANE_W / 2, subtract(intersect(laneLand[0], laneLand[1]), fords));
-    dashes(LANE_W / 2, subtract(intersect(laneLand[1], laneLand[2]), fords));
-    // fords: flooded wooden causeway with a water film that crossers float on
-    for (const [a, b] of fords) {
-      wood.top(-EDGE, EDGE, Z(b), Z(a), -0.04, (x, z) => [x, z]);
-      wood.sides(-EDGE, EDGE, Z(b), Z(a), BOTTOM, -0.04, 2.2, 'fb');
-      fordW.top(-CANAL_X - 2, CANAL_X + 2, Z(b), Z(a), 0.03, (x, z) => [x / 4, z / 4]);
-      for (const x of [-EDGE, EDGE]) for (let s = a + 0.6; s < b; s += 2.2) wood.box(x - 0.09, x + 0.09, -0.3, 0.55, Z(s + 0.18), Z(s));
-    }
-    // ---- side chinampas ----
-    const sideCuts = [...sec.cuts];
-    const sideLand = subtract([[s0, s1]], sideCuts);
-    const grass = new GeoBuilder();
+
+    // ---- side chinampas (raised banks that wall in the canal) ----
+    const sideLand = subtract([[s0, s1]], sec.cuts);
+    const grass = new GeoBuilder(), bank = new GeoBuilder(), wood = new GeoBuilder();
     for (const sgn of [-1, 1]) {
-      const xa = sgn < 0 ? -CANAL_X : EDGE, xb = sgn < 0 ? -EDGE : CANAL_X;
+      const xa = sgn < 0 ? -CANAL_X : BANK_IN, xb = sgn < 0 ? -BANK_IN : CANAL_X;
       for (const [a, b] of sideLand) {
-        grass.top(xa, xb, Z(b), Z(a), 0.02, (x, z) => [x, z]);
-        bank.sides(xa, xb, Z(b), Z(a), BOTTOM, 0.02, 4, (sgn < 0 ? 'l' : 'r') + 'fb');
-        // inner wall toward canal lanes
-        const inner = sgn < 0 ? 0 : 2;
-        for (const [wa, wb] of subtract([[a, b]], laneLand[inner])) bank.sides(xa, xb, Z(wb), Z(wa), BOTTOM, 0.02, 4, sgn < 0 ? 'r' : 'l');
+        grass.top(xa, xb, Z(b), Z(a), BANK_H, (x, z) => [x, z]);
+        bank.sides(xa, xb, Z(b), Z(a), BOTTOM, BANK_H, 4, 'lrfb');
+        // wooden stakes holding the chinampa edge
+        const xe = sgn < 0 ? -BANK_IN : BANK_IN;
+        for (let s = a + 0.5; s < b - 0.3; s += 1.7) wood.box(xe - 0.08, xe + 0.08, -0.2, BANK_H + 0.18, Z(s + 0.16), Z(s));
       }
-      // far chinampa across the side canal
       const fa = sgn < 0 ? -FAR_X - 40 : FAR_X, fb = sgn < 0 ? -FAR_X : FAR_X + 40;
-      grass.top(fa, fb, Z(s1), Z(s0), 0.02, (x, z) => [x, z]);
-      bank.sides(fa, fb, Z(s1), Z(s0), BOTTOM, 0.02, 4, sgn < 0 ? 'r' : 'l');
+      grass.top(fa, fb, Z(s1), Z(s0), BANK_H, (x, z) => [x, z]);
+      bank.sides(fa, fb, Z(s1), Z(s0), BOTTOM, BANK_H, 4, sgn < 0 ? 'r' : 'l');
     }
-    addGeo(top, this.mat.path); addGeo(bank, this.mat.bank); addGeo(stone, this.mat.stone); addGeo(wood, this.mat.wood); addGeo(grass, this.mat.grass);
-    const fw = addGeo(fordW, this.mat.ford, false); if (fw) fw.renderOrder = 2;
+    // fords: side channels open to the canal; mooring posts mark them
+    for (const [a, b] of sec.ford) for (const sgn of [-1, 1]) for (const s of [a - 0.4, b + 0.4]) {
+      const x = sgn * (BANK_IN + 0.3);
+      wood.box(x - 0.13, x + 0.13, -0.3, 1.8, Z(s + 0.13), Z(s - 0.13));
+    }
+    addGeo(bank, this.mat.bank); addGeo(wood, this.mat.wood); addGeo(grass, this.mat.grass);
 
     // ---- vegetation (instanced) ----
-    const rng = mulberry(sec.id * 7919 + 13);
-    const flowers = [], bushes = [], trees = [];
-    const onSide = (s) => sideLand.some(([a, b]) => s > a + 0.6 && s < b - 0.6);
+    const flowers = [], bushes = [], trees = [], reeds = [], lilies = [], petals = [];
+    const onSide = (s, m = 0.6) => sideLand.some(([a, b]) => s > a + m && s < b - m);
+    // floating marigold garlands mark the lane dividers where both lanes are safe
+    for (const [x, iv] of [[-LANE_W / 2, intersect(laneLand[0], laneLand[1])], [LANE_W / 2, intersect(laneLand[1], laneLand[2])]]) {
+      for (const [a, b] of iv) for (let s = a + 0.3; s < b - 0.3; s += 0.75) petals.push([x + (rng() - 0.5) * 0.08, s, 0.55 + rng() * 0.2, 0.0]);
+    }
     for (const sgn of [-1, 1]) {
-      // dense marigold borders along the lanes
-      for (let s = s0; s < s1; s += 0.55) {
+      for (let s = s0; s < s1; s += 0.5) {
         if (!onSide(s)) continue;
-        for (let r = 0; r < 3; r++) if (rng() < 0.85) flowers.push([sgn * (EDGE + 0.35 + r * 0.38 + rng() * 0.2), s + rng() * 0.4, 0.8 + rng() * 0.5]);
+        for (let r = 0; r < 4; r++) if (rng() < 0.85) flowers.push([sgn * (BANK_IN + 0.35 + r * 0.36 + rng() * 0.2), s + rng() * 0.4, 0.9 + rng() * 0.5, BANK_H]);
       }
-      // cultivated rows (chinampa crops) and bushes
-      for (let s = s0 + rng() * 3; s < s1; s += 3.2) {
+      for (let s = s0 + rng() * 2; s < s1; s += 1.1 + rng() * 1.2) {
+        if (onSide(s, 0.3)) reeds.push([sgn * (EDGE + 0.05 + rng() * 0.35), s, 0.8 + rng() * 0.5, 0]);
+      }
+      for (let s = s0 + rng() * 6; s < s1; s += 5 + rng() * 6) lilies.push([sgn * (EDGE - 0.15 + rng() * 0.4), s, 0.7 + rng() * 0.5, 0.0]);
+      for (let s = s0 + rng() * 3; s < s1; s += 2.4) {
         if (!onSide(s)) continue;
-        const x = sgn * (EDGE + 1.9 + rng() * 0.6);
-        bushes.push([x, s, 0.6 + rng() * 0.5]);
-        for (let c = 0; c < 4; c++) if (rng() < 0.7) flowers.push([sgn * (EDGE + 3.2 + c * 1.1), s + rng(), 1.2 + rng() * 0.6]);
-        if (rng() < 0.5) bushes.push([sgn * (EDGE + 4 + rng() * 4.5), s + 1.5, 0.7 + rng() * 0.6]);
+        bushes.push([sgn * (BANK_IN + 2.4 + rng() * 0.8), s, 0.8 + rng() * 0.6, BANK_H]);
+        for (let c = 0; c < 3; c++) if (rng() < 0.7) flowers.push([sgn * (BANK_IN + 3.4 + c * 0.9), s + rng(), 1.3 + rng() * 0.6, BANK_H]);
       }
-      // ahuejote rows on the canal edge and far bank
-      for (let s = s0 + rng() * 4; s < s1; s += 5 + rng() * 3) {
-        if (onSide(s)) trees.push([sgn * (CANAL_X - 0.9 - rng() * 0.5), s, 0.85 + rng() * 0.35]);
-        trees.push([sgn * (FAR_X + 1 + rng() * 2), s + rng() * 2, 0.9 + rng() * 0.4]);
-        if (rng() < 0.6) trees.push([sgn * (FAR_X + 8 + rng() * 20), s + rng() * 4, 0.9 + rng() * 0.5]);
+      // ahuejote walls: a dense row right at the chinampa edge, another behind, more across the side canal
+      for (let s = s0 + rng() * 2; s < s1; s += 2.6 + rng() * 1.6) {
+        if (onSide(s, 0.8)) trees.push([sgn * (BANK_IN + 1.2 + rng() * 0.5), s, 1.0 + rng() * 0.35, BANK_H]);
+        if (onSide(s + 1.3, 0.8) && rng() < 0.8) trees.push([sgn * (CANAL_X - 1.0 - rng() * 0.8), s + 1.3, 1.05 + rng() * 0.4, BANK_H]);
+        trees.push([sgn * (FAR_X + 1 + rng() * 1.5), s + rng() * 2, 1.0 + rng() * 0.4, BANK_H]);
+        if (rng() < 0.5) trees.push([sgn * (FAR_X + 6 + rng() * 20), s + rng() * 4, 1.0 + rng() * 0.5, BANK_H]);
       }
-      for (let s = s0; s < s1; s += 1.4) flowers.push([sgn * (FAR_X + 0.4 + rng() * 1.2), s, 1 + rng() * 0.6]);
+      for (let s = s0 + rng() * 4; s < s1; s += 3 + rng() * 4) lilies.push([sgn * (CANAL_X + 0.6 + rng() * (CANAL_W - 1.2)), s, 0.8 + rng() * 0.6, 0.0]);
+      for (let s = s0; s < s1; s += 1.6) reeds.push([sgn * (FAR_X - 0.2 - rng() * 0.4), s, 0.9 + rng() * 0.4, 0]);
     }
     const inst = (geo, mat, list, colors, cast) => {
-      if (!list.length) return;
+      if (!geo || !list.length) return;
       const m = new THREE.InstancedMesh(geo, mat, list.length);
       const M = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), p = new THREE.Vector3(), sc = new THREE.Vector3();
       const c = new THREE.Color();
-      list.forEach(([x, s, k], i) => {
+      list.forEach(([x, s, k, y], i) => {
         e.set(0, rng() * 6.28, 0); q.setFromEuler(e);
-        M.compose(p.set(x, 0.02, -s), q, sc.set(k, k, k)); m.setMatrixAt(i, M);
+        M.compose(p.set(x, y, -s), q, sc.set(k, k, k)); m.setMatrixAt(i, M);
         if (colors) m.setColorAt(i, c.setHex(colors[(rng() * colors.length) | 0]));
       });
       m.castShadow = cast && shadows; m.receiveShadow = false;
@@ -306,9 +355,12 @@ export class Track {
       G.add(m);
     };
     inst(this.flowers.flowerGeo, this.flowers.flowerMat, flowers, FLOWER_COLORS, false);
+    inst(this.flowers.flowerGeo, this.flowers.flowerMat, petals, GARLAND_COLORS, false);
     inst(this.flowers.bushGeo, this.flowers.bushMat, bushes, null, false);
     inst(this.trees.trunkGeo, this.trees.trunkMat, trees, null, false);
     inst(this.trees.foliageGeo, this.trees.foliageMat, trees, null, true);
+    if (this.reeds) inst(this.reeds.geometry, this.reeds.material, reeds, null, false);
+    if (this.lilies) inst(this.lilies.geometry, this.lilies.material, lilies, null, false);
 
     // ---- obstacles ----
     for (const o of sec.obstacles) {
@@ -325,33 +377,31 @@ export class Track {
     }
     for (const c of sec.crossers) {
       const m = makeTrajinera({ len: c.len, palette: c.palette, name: c.name, style: 'small' });
-      if (c.dir < 0) m.rotation.y = 0; // name always faces the player
       shadowize(m, shadows);
       G.add(m); vis.crossers.push({ mesh: m, c });
     }
     // ---- decor ----
-    for (const s of sec.arches) { const a = makeFlowerArch(9.6); a.position.z = -s; shadowize(a, shadows); G.add(a); }
-    for (const s of sec.papel) { const p = makePapelString(EDGE * 2 + 2.6); p.position.z = -s; G.add(p); vis.papel.push(p); }
-    // side-canal trajineras (scenery) and houses
-    for (let s = s0 + 10 + rng() * 20; s < s1; s += 28 + rng() * 30) {
+    for (const s of sec.arches) { const a = makeFlowerArch(ARCH_W); a.position.z = -s; shadowize(a, shadows); G.add(a); }
+    for (const s of sec.papel) { const p = makePapelString(BANK_IN * 2 + 1.6); p.position.z = -s; p.position.y += BANK_H * 0.5; G.add(p); vis.papel.push(p); }
+    for (let s = s0 + 10 + rng() * 20; s < s1; s += 24 + rng() * 26) {
       const sgn = rng() < 0.5 ? -1 : 1;
       const m = makeTrajinera({ len: 8 + rng() * 3, palette: (rng() * PALETTES.length) | 0, name: pickName(rng), style: 'decor' });
       m.position.set(sgn * (CANAL_X + CANAL_W / 2), 0, -s);
       if (rng() < 0.5) m.rotation.y = Math.PI;
       G.add(m); vis.drifters.push({ mesh: m, z0: -s, ph: rng() * 6.28 });
     }
-    for (let s = s0 + rng() * 40; s < s1; s += 35 + rng() * 40) {
-      if (!onSide(s)) continue;
+    for (let s = s0 + rng() * 25; s < s1; s += 22 + rng() * 26) {
+      if (!onSide(s, 3)) continue;
       const sgn = rng() < 0.5 ? -1 : 1;
       const h = makeHouse((rng() * 4) | 0);
-      h.position.set(sgn * (EDGE + 6.5), 0.02, -s); h.rotation.y = sgn * Math.PI / 2;
+      h.position.set(sgn * (BANK_IN + 5.2), BANK_H, -s); h.rotation.y = -sgn * Math.PI / 2;
       shadowize(h, false);
       G.add(h);
     }
-    for (let s = s0 + rng() * 30; s < s1; s += 30 + rng() * 30) {
+    for (let s = s0 + rng() * 20; s < s1; s += 18 + rng() * 22) {
       const sgn = rng() < 0.5 ? -1 : 1;
       const h = makeHouse((rng() * 4) | 0);
-      h.position.set(sgn * (FAR_X + 6 + rng() * 6), 0.02, -s); h.rotation.y = -sgn * Math.PI / 2;
+      h.position.set(sgn * (FAR_X + 5 + rng() * 6), BANK_H, -s); h.rotation.y = -sgn * Math.PI / 2;
       G.add(h);
     }
     this.root.add(G);
