@@ -156,3 +156,9 @@ body.touch .only-desktop { display: none; }
   .big-btn { font-size: 30px; }
   .ctl { padding: 8px 10px; }
 }
+
+.auto-btn { display: block; margin: 12px auto 0; padding: 8px 18px; border: 2px solid var(--cream); border-radius: 999px; background: rgba(43, 22, 64, 0.55); color: var(--cream); font: 700 15px/1.2 'Nunito', sans-serif; letter-spacing: 0.04em; cursor: pointer; pointer-events: auto; }
+.auto-btn small { display: block; font-weight: 600; font-size: 11px; opacity: 0.8; letter-spacing: 0; }
+.auto-btn:hover { background: var(--turq); }
+.round-btn.auto-hud { font: 700 16px/1 'Lilita One', sans-serif; color: var(--cream); }
+.round-btn.auto-hud.is-on { background: var(--turq); box-shadow: 0 0 0 3px var(--cream); }

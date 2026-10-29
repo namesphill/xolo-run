@@ -19,6 +19,10 @@ const ui = {
 
 const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 const params = new URLSearchParams(location.search);
+const CAPTURE = params.has('capture');
+let vnow = 0, simN = 0, nextSeed = null, autopilot = null;
+const vtimers = [], alog = [];
+const later = (fn, ms) => (CAPTURE ? vtimers.push({ t: vnow + ms, fn }) : setTimeout(fn, ms));
 let quality = params.get('q') || (isTouch || (navigator.hardwareConcurrency || 8) <= 4 ? 'low' : 'high');
 
 let renderer;
@@ -49,6 +53,13 @@ xolo.onFootfall = (pos) => { lastFootfall = time; if (state === 'play' && player
 xolo.root.scale.setScalar(XOLO_SCALE);
 scene.add(xolo.root);
 const audio = new AudioFX();
+if (CAPTURE) {
+  for (const m of ['sfx', 'startMusic', 'stopMusic', 'pauseAll', 'resumeAll', 'unlock']) {
+    audio[m] = (...a) => { alog.push([vnow / 1000, m, ...a]); return m === 'unlock' ? Promise.resolve(true) : undefined; };
+  }
+  let lastI = -1;
+  audio.setMusicIntensity = (v) => { if (Math.abs(v - lastI) > 0.02) { lastI = v; alog.push([vnow / 1000, 'setMusicIntensity', v]); } };
+}
 await preloadModelFonts();
 const track = new Track(scene, world, { quality });
 
@@ -74,7 +85,7 @@ function resetRun() {
   player = newPlayer(); prevP = { ...player };
   skulls = 0; combo = 0; comboT = 0; runTime = 0; deathT = 0; newBestShown = false; acc = 0;
   input.left = input.right = input.jump = 0;
-  track.reset((Math.random() * 1e9) | 0);
+  track.reset(nextSeed ?? ((Math.random() * 1e9) | 0)); simN = 0;
   xolo.reset();
   ui.dist.textContent = '0'; ui.skulls.textContent = '0';
 }
@@ -86,11 +97,12 @@ function startRun() {
   state = 'play';
   show(ui.start, false); show(ui.over, false); show(ui.pause, false); show(ui.hud, true);
   audio.startMusic();
-  if (firstRun) {
+  if (auto) setAuto(true);
+  else if (firstRun) {
     ui.hint.textContent = isTouch ? 'Swipe ← → to switch lanes · swipe ↑ to jump' : '← → / A D to switch lanes · Space / ↑ to jump';
     show(ui.hint, true); ui.hint.classList.remove('fade');
-    setTimeout(() => ui.hint.classList.add('fade'), 3800);
-    setTimeout(() => show(ui.hint, false), 4600);
+    later(() => ui.hint.classList.add('fade'), 3800);
+    later(() => show(ui.hint, false), 4600);
     firstRun = false;
   }
 }
@@ -100,7 +112,7 @@ function pauseGame() {
 }
 function resumeGame() {
   if (state !== 'paused') return;
-  state = 'play'; show(ui.pause, false); audio.resumeAll(); last = performance.now();
+  state = 'play'; show(ui.pause, false); audio.resumeAll(); last = CAPTURE ? vnow : performance.now();
 }
 function toMenu() {
   state = 'menu'; resetRun();
@@ -135,6 +147,43 @@ function gameOver() {
   show(ui.oNew, isNew);
   show(ui.hud, false); show(ui.over, true);
   setBestUI();
+  if (auto) later(() => { if (auto && state === 'over') startRun(); }, 3000);
+}
+
+// ---------------- autoplay ----------------
+let auto = params.has('auto');
+const AP_ACTS = [{}, { left: 1 }, { right: 1 }, { jump: 1 }, { left: 1, jump: 1 }, { right: 1, jump: 1 }];
+const AP_COST = [0, 0.35, 0.35, 0.25, 0.5, 0.5];
+function autoDecide() {
+  const secs = track.sections;
+  let beam = [{ p: { ...player }, first: 0, score: 0 }];
+  for (let d = 0; d < 10; d++) {
+    const next = new Map();
+    for (const b of beam) for (let ai = 0; ai < AP_ACTS.length; ai++) {
+      const a = AP_ACTS[ai];
+      if (!b.p.grounded && a.jump && !a.left && !a.right) continue;
+      const q = { ...b.p }; let ok = true;
+      for (let f = 0; f < 6; f++) {
+        const ev = stepPlayer(q, f === 0 ? a : {}, DT, secs);
+        if (!q.alive || ev.some((e) => e.type === 'stumble')) { ok = false; break; }
+      }
+      if (!ok) continue;
+      const first = d === 0 ? ai : b.first;
+      const score = b.score - AP_COST[ai] * (d === 0 ? 1 : 0.5) + (q.lane === 1 ? 0.03 : 0);
+      const key = `${first}|${q.lane}|${q.grounded}|${Math.round(q.y * 3)}|${Math.round(q.x * 2)}|${Math.round(q.vy)}`;
+      const o = next.get(key);
+      if (!o || o.score < score) next.set(key, { p: q, first, score });
+    }
+    if (!next.size) break;
+    beam = [...next.values()].sort((x, y) => y.score - x.score).slice(0, 24);
+  }
+  return AP_ACTS[beam[0].first];
+}
+function setAuto(on) {
+  auto = on;
+  ui.hint.textContent = 'AUTO-PLAY · press T or tap the A button to take over';
+  show(ui.hint, auto); ui.hint.classList.remove('fade');
+  $('btn-auto-hud').classList.toggle('is-on', auto);
 }
 
 // ---------------- input ----------------
@@ -154,6 +203,7 @@ addEventListener('keydown', (e) => {
     if (k === 'Space' || k === 'Enter') startRun();
   }
   if (k === 'KeyM') toggleMute();
+  if (k === 'KeyT') { setAuto(!auto); if (auto && (state === 'menu' || state === 'over')) startRun(); }
 });
 let touch = null;
 const canvas = $('game');
@@ -176,7 +226,9 @@ addEventListener('touchmove', (e) => {
 addEventListener('touchend', () => { touch = null; }, { passive: true });
 canvas.addEventListener('pointerdown', () => { if (state === 'menu') return; });
 
-$('btn-play').addEventListener('click', startRun);
+$('btn-play').addEventListener('click', () => { setAuto(false); startRun(); });
+$('btn-auto').addEventListener('click', () => { setAuto(true); startRun(); });
+$('btn-auto-hud').addEventListener('click', (e) => { e.currentTarget.blur(); setAuto(!auto); });
 $('btn-restart').addEventListener('click', startRun);
 $('btn-restart-p').addEventListener('click', startRun);
 $('btn-menu').addEventListener('click', toMenu);
@@ -186,8 +238,10 @@ $('btn-resume').addEventListener('click', resumeGame);
 function toggleMute() { audio.unlock(); const m = audio.toggleMute(); ui.mute.classList.toggle('is-muted', m); }
 ui.mute.addEventListener('click', (e) => { e.currentTarget.blur(); toggleMute(); });
 document.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { audio.sfx('click'); b.blur(); }));
-document.addEventListener('visibilitychange', () => { if (document.hidden) pauseGame(); });
-addEventListener('blur', pauseGame);
+if (!CAPTURE) {
+  document.addEventListener('visibilitychange', () => { if (document.hidden && !auto) pauseGame(); });
+  addEventListener('blur', () => { if (!auto) pauseGame(); });
+}
 
 // ---------------- camera ----------------
 const camPos = new THREE.Vector3(0, 3.4, 6.2), camLook = new THREE.Vector3(0, 1.1, -6);
@@ -231,6 +285,9 @@ function updateCamera(dt) {
 // ---------------- simulation ----------------
 function simStep() {
   prevP = { s: player.s, x: player.x, y: player.y };
+  if (autopilot && autopilot[simN]) Object.assign(input, autopilot[simN]);
+  else if (auto && simN % 6 === 0) Object.assign(input, autoDecide());
+  simN++;
   const evs = stepPlayer(player, input, DT, track.sections);
   input.left = input.right = input.jump = 0;
   for (const ev of evs) {
@@ -263,7 +320,7 @@ function simStep() {
 let last = performance.now();
 let fpsAcc = 0, fpsN = 0, fpsChecked = 0;
 function frame(now) {
-  requestAnimationFrame(frame);
+  if (!CAPTURE) requestAnimationFrame(frame);
   let dt = Math.min(0.1, (now - last) / 1000); last = now;
   time += dt;
   if (state === 'play') {
@@ -279,7 +336,7 @@ function frame(now) {
     audio.setMusicIntensity(Math.min(1, (speedAt(player.s) - 12) / 14));
     if (!newBestShown && best > 0 && score() > best) {
       newBestShown = true; show(ui.toast, true); ui.toast.style.animation = 'none'; void ui.toast.offsetWidth; ui.toast.style.animation = '';
-      audio.sfx('newbest'); setTimeout(() => show(ui.toast, false), 2300);
+      audio.sfx('newbest'); later(() => show(ui.toast, false), 2300);
     }
   } else if (state === 'dying') {
     deathT += dt;
@@ -309,7 +366,7 @@ function frame(now) {
   renderer.render(scene, camera);
 
   // adaptive resolution: drop pixel ratio if we can't hold ~50 fps
-  if (state === 'play' && fpsChecked < 3) {
+  if (!CAPTURE && state === 'play' && fpsChecked < 3) {
     fpsAcc += dt; fpsN++;
     if (fpsAcc > 2.5) {
       const fps = fpsN / fpsAcc; fpsAcc = 0; fpsN = 0; fpsChecked++;
@@ -320,8 +377,18 @@ function frame(now) {
 
 resetRun();
 updateCamera(1);
-requestAnimationFrame((t) => { last = t; frame(t); });
+if (!CAPTURE) requestAnimationFrame((t) => { last = t; frame(t); }); else last = 0;
+if (auto && !CAPTURE) setTimeout(() => startRun(), 1200);
 setTimeout(() => { ui.loading.classList.add('fade'); setTimeout(() => show(ui.loading, false), 600); }, 150);
 
 // debug/testing hooks
-window.__xolo = { get state() { return state; }, get player() { return player; }, get skulls() { return skulls; }, track, startRun, input, renderer, scene, camera };
+window.__xolo = {
+  get state() { return state; }, get player() { return player; }, get skulls() { return skulls; }, get simN() { return simN; },
+  track, startRun, pauseGame, resumeGame, toMenu, input, renderer, scene, camera, alog,
+  set seed(v) { nextSeed = v; }, set autopilot(v) { autopilot = v; },
+  tick(ms) {
+    vnow += ms;
+    for (let i = vtimers.length - 1; i >= 0; i--) if (vtimers[i].t <= vnow) { const t = vtimers.splice(i, 1)[0]; t.fn(); }
+    frame(vnow);
+  },
+};
