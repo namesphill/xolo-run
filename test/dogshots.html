@@ -1,0 +1,54 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>xolo shots</title>
+<style>html,body{margin:0;background:#222}canvas{display:block}</style>
+<script type="importmap">{ "imports": { "three": "../js/vendor/three.module.js", "three/addons/": "../js/vendor/" } }</script>
+</head><body>
+<script type="module">
+// Fixed-camera contact sheet of the xolo for review (6 views). ?m=base renders test/xolo_base.js if present (copy an old js/xolo.js there to compare).
+import * as THREE from 'three';
+import { createWorld } from '../js/world.js';
+const q = new URLSearchParams(location.search);
+const mod = await import(q.get('m') === 'base' ? './xolo_base.js' : '../js/xolo.js');
+const TW = 640, TH = 480, COLS = 3, ROWS = 2;
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1); renderer.setSize(TW * COLS, TH * ROWS);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.autoClear = false;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const world = createWorld(renderer, scene, { quality: 'high', waterY: 0 });
+const idle = mod.createXolo(), run = mod.createXolo();
+for (const x of [idle, run]) { x.setShadow(true); scene.add(x.root); }
+const DT = 1 / 60;
+for (let i = 0; i < 90; i++) idle.update(DT, { mode: 'idle', speed: 0, grounded: true, vy: 0, lateral: 0 });
+const runFrames = +(q.get('rf') || 140);
+for (let i = 0; i < runFrames; i++) run.update(DT, { mode: 'run', speed: 14, grounded: true, vy: 0, lateral: 0 });
+const cam = new THREE.PerspectiveCamera(35, TW / TH, 0.02, 400);
+const views = [
+  { x: idle, p: [1.6, 1.05, -2.0], t: [0, 0.5, -0.1], f: 35 },    // front 3/4
+  { x: idle, p: [2.9, 0.65, -0.05], t: [0, 0.52, -0.05], f: 35 },  // side
+  { x: idle, p: [0.5, 0.98, -1.2], t: [0, 0.82, -0.46], f: 30 },  // head close-up
+  { x: run, p: [1.5, 1.25, 2.1], t: [0, 0.5, -0.1], f: 35 },       // rear 3/4 running
+  { x: run, p: [2.9, 0.6, -0.1], t: [0, 0.5, -0.1], f: 35 },       // side running
+  { x: run, p: [0, 3.4, 6.2], t: [0, 1.1, -6], f: 60, zoom: 4 },   // game camera (4x zoom crop)
+];
+for (let i = 0; i < 4; i++) world.update(DT, i * DT, new THREE.Vector3(), cam);
+renderer.setScissorTest(true);
+renderer.clear();
+views.forEach((v, i) => {
+  idle.root.visible = v.x === idle; run.root.visible = v.x === run;
+  cam.fov = v.f; cam.zoom = v.zoom || 1; cam.aspect = TW / TH; cam.updateProjectionMatrix();
+  cam.position.set(...v.p); cam.lookAt(...v.t);
+  if (v.zoom) cam.lookAt(0, 0.55, 0);
+  world.update(0, 0, new THREE.Vector3(), cam);
+  const x = (i % COLS) * TW, y = (ROWS - 1 - Math.floor(i / COLS)) * TH;
+  renderer.setViewport(x, y, TW, TH); renderer.setScissor(x, y, TW, TH);
+  renderer.render(scene, cam);
+});
+let tris = 0, verts = 0;
+for (const x of [idle]) x.root.traverse((o) => { if (o.isMesh && o.geometry.index) { tris += o.geometry.index.count / 3; verts += o.geometry.attributes.position.count; } });
+window.__stats = { tris, verts, calls: renderer.info.render.calls };
+window.__done = true;
+</script></body></html>

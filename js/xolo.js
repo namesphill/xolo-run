@@ -15,12 +15,12 @@ const damp = (a, b, rate, dt) => a + (b - a) * (1 - Math.exp(-rate * dt));
 const smooth = (t) => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
 
 export const XOLO_DEFAULTS = {
-  skinColor: '#1c1c21',
+  skinColor: '#211d20',
   roughness: 0.26,
   clearcoat: 0.9,
   clearcoatRoughness: 0.2,
   envMapIntensity: 1.3,
-  innerEarColor: '#f7aeb6',
+  innerEarColor: '#f29aa6',
   rimColor: '#ff9a4d',   // warm fresnel rim so the black silhouette separates from the path
   rimStrength: 0.42,
   rimPower: 3.0,
@@ -122,7 +122,7 @@ function ellipsoid(rx, ry, rz, ws = 12, hs = 8) {
 
 // Large bat ear: cupped shell opening toward -Z, base at origin, extends +Y.
 function earGeos(H, W, cup, thick) {
-  const NU = 14, NV = 12;
+  const NU = 26, NV = 18;
   const wAt = (u) => W * Math.pow(Math.max(0, Math.sin(Math.PI * (0.16 + 0.84 * u))), 0.6);
   const front = (u, v) => [
     wAt(u) * v,
@@ -152,9 +152,21 @@ function earGeos(H, W, cup, thick) {
     const uu = 0.05 + u * 0.86, vv = v * 0.84;
     const p = front(uu, vv); p[2] -= 0.003; return p;
   }, true);
+  {
+    const col = [], c = new THREE.Color(), deep = new THREE.Color(0.62, 0.38, 0.42), mid = new THREE.Color(1, 1, 1), edge = new THREE.Color(0.86, 0.72, 0.76);
+    for (let i = 0; i <= NU; i++) for (let j = 0; j <= NV; j++) {
+      const u = i / NU, v = (j / NV) * 2 - 1;
+      c.copy(deep).lerp(mid, smooth(u * 2.2 + Math.abs(v) * 0.4)).lerp(edge, smooth((Math.abs(v) - 0.6) / 0.4) * 0.6);
+      const vein = Math.pow(Math.max(0, Math.cos((v * 3.2 + Math.sin(u * 7) * 0.25) * Math.PI)), 18) * smooth((u - 0.12) / 0.2) * (1 - u) * 0.35;
+      c.multiplyScalar(1 - vein);
+      col.push(c.r, c.g, c.b);
+    }
+    inner.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  }
   // thin pink lip wrapping onto the back edge so the ear reads from behind
   const backAt = (u, v) => { const p = front(u, v); p[2] += thick * Math.sqrt(Math.max(0, 1 - v * v)) * (1 - 0.7 * u) + 0.0025; return p; };
   const lips = [-1, 1].map((sd) => grid((u, v) => backAt(0.04 + u * 0.9, sd * (0.84 + 0.15 * (v + 1) / 2)), sd < 0));
+  for (const l of lips) l.setAttribute('color', new THREE.Float32BufferAttribute(new Array(l.attributes.position.count * 3).fill(0.88), 3));
   return { outer, inner: mergeGeometries([inner, ...lips]) };
 }
 
@@ -245,26 +257,47 @@ const HIP = [
   { z: 0.41, w: 0.035, h: 0.035, y: 0.07 },
   { z: 0.42, w: 0.01, h: 0.01, y: 0.07 },
 ];
+// body-space torso: brisket, deep chest, tucked waist, rounded haunch
+const TORSO = [
+  { z: -0.468, w: 0.025, h: 0.03, y: 0.035 },
+  { z: -0.452, w: 0.074, h: 0.09, y: 0.028 },
+  { z: -0.415, w: 0.108, h: 0.138, y: 0.006, k: 0.2 },
+  { z: -0.345, w: 0.13, h: 0.163, y: -0.014, k: 0.36 },
+  { z: -0.255, w: 0.135, h: 0.163, y: -0.014, k: 0.4 },
+  { z: -0.16, w: 0.128, h: 0.148, y: -0.002, k: 0.38 },
+  { z: -0.075, w: 0.11, h: 0.118, y: 0.026, k: 0.25 },
+  { z: 0.0, w: 0.096, h: 0.094, y: 0.05, k: 0.08 },
+  { z: 0.07, w: 0.097, h: 0.09, y: 0.06 },
+  { z: 0.15, w: 0.11, h: 0.098, y: 0.066 },
+  { z: 0.24, w: 0.118, h: 0.103, y: 0.07 },
+  { z: 0.32, w: 0.11, h: 0.097, y: 0.074 },
+  { z: 0.385, w: 0.085, h: 0.079, y: 0.079 },
+  { z: 0.42, w: 0.048, h: 0.048, y: 0.082 },
+  { z: 0.432, w: 0.012, h: 0.012, y: 0.082 },
+];
 const HEAD = [
-  { z: 0.075, w: 0.01, h: 0.01, y: 0.06 },
-  { z: 0.06, w: 0.05, h: 0.05, y: 0.06 },
-  { z: 0.03, w: 0.077, h: 0.073, y: 0.056 },
-  { z: -0.02, w: 0.087, h: 0.077, y: 0.05 },
-  { z: -0.07, w: 0.08, h: 0.07, y: 0.045 },
-  { z: -0.11, w: 0.064, h: 0.056, y: 0.035 },
-  { z: -0.15, w: 0.048, h: 0.043, y: 0.02 },
-  { z: -0.2, w: 0.038, h: 0.034, y: 0.008 },
-  { z: -0.245, w: 0.031, h: 0.028, y: 0.0 },
-  { z: -0.27, w: 0.022, h: 0.02, y: -0.002 },
-  { z: -0.282, w: 0.008, h: 0.008, y: -0.002 },
+  { z: 0.085, w: 0.012, h: 0.012, y: 0.062 },
+  { z: 0.07, w: 0.05, h: 0.052, y: 0.062 },
+  { z: 0.04, w: 0.078, h: 0.075, y: 0.058 },
+  { z: -0.005, w: 0.09, h: 0.08, y: 0.052 },
+  { z: -0.055, w: 0.086, h: 0.074, y: 0.044, k: 0.1 },
+  { z: -0.095, w: 0.072, h: 0.062, y: 0.032, k: 0.15 },
+  { z: -0.13, w: 0.058, h: 0.051, y: 0.02, k: 0.12 },
+  { z: -0.17, w: 0.05, h: 0.046, y: 0.01, k: 0.08 },
+  { z: -0.21, w: 0.043, h: 0.041, y: 0.003 },
+  { z: -0.245, w: 0.036, h: 0.035, y: -0.002 },
+  { z: -0.268, w: 0.028, h: 0.028, y: -0.003 },
+  { z: -0.281, w: 0.016, h: 0.017, y: -0.003 },
+  { z: -0.287, w: 0.005, h: 0.005, y: -0.003 },
 ];
 const JAW = [
   { z: 0.03, w: 0.01, h: 0.01, y: -0.012 },
-  { z: 0.01, w: 0.05, h: 0.028, y: -0.012 },
-  { z: -0.06, w: 0.046, h: 0.024, y: -0.016 },
-  { z: -0.13, w: 0.035, h: 0.019, y: -0.018 },
-  { z: -0.19, w: 0.026, h: 0.015, y: -0.016 },
-  { z: -0.215, w: 0.01, h: 0.008, y: -0.014 },
+  { z: 0.01, w: 0.055, h: 0.032, y: -0.014 },
+  { z: -0.06, w: 0.05, h: 0.028, y: -0.018 },
+  { z: -0.13, w: 0.04, h: 0.022, y: -0.02 },
+  { z: -0.19, w: 0.031, h: 0.017, y: -0.018 },
+  { z: -0.225, w: 0.02, h: 0.012, y: -0.016 },
+  { z: -0.236, w: 0.006, h: 0.006, y: -0.015 },
 ];
 
 // ---------------------------------------------------------------- main
@@ -282,8 +315,34 @@ export function createXolo(params = {}) {
   const rimU = { rimColor: { value: new THREE.Color() }, rimPower: { value: 2.6 } };
   mats[0].onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, rimU);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec3 rest;\nvarying vec3 vRest;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvRest = rest;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', '#include <common>\nuniform vec3 rimColor;\nuniform float rimPower;')
+      .replace('#include <common>', `#include <common>
+uniform vec3 rimColor;
+uniform float rimPower;
+varying vec3 vRest;
+float xHash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float xNoise(vec3 x) {
+  vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(xHash(i), xHash(i + vec3(1,0,0)), f.x), mix(xHash(i + vec3(0,1,0)), xHash(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(xHash(i + vec3(0,0,1)), xHash(i + vec3(1,0,1)), f.x), mix(xHash(i + vec3(0,1,1)), xHash(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
+float xSkin(vec3 p) { return xNoise(p * 95.0) * 0.2 + xNoise(p * 34.0) * 0.45 + xNoise(p * 12.0) * 0.35; }`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+      float skinN = xSkin(vRest);
+      float skinFade = 1.0 - smoothstep(2.5, 9.0, length(vViewPosition));
+      roughnessFactor = clamp(roughnessFactor * (0.85 + 0.35 * skinN * skinFade), 0.05, 1.0);`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+      {
+        float hS = skinN * 0.0007 * skinFade;
+        vec2 dH = vec2(dFdx(hS), dFdy(hS));
+        vec3 sx = dFdx(-vViewPosition), sy = dFdy(-vViewPosition);
+        vec3 r1 = cross(sy, normal), r2 = cross(normal, sx);
+        float det = dot(sx, r1) * faceDirection;
+        normal = normalize(abs(det) * normal - sign(det) * (dH.x * r1 + dH.y * r2));
+      }`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
       {
         float rimF = pow(1.0 - saturate(dot(normal, normalize(vViewPosition))), rimPower);
@@ -302,7 +361,7 @@ export function createXolo(params = {}) {
     m.clearcoatRoughness = P.clearcoatRoughness;
     for (const mm of mats) mm.envMapIntensity = P.envMapIntensity;
     mats[1].color.set(P.innerEarColor);
-    mats[1].emissive.set(P.innerEarColor).multiplyScalar(0.16);
+    mats[1].emissive.set(P.innerEarColor).multiplyScalar(0.1);
     mats[2].color.set(P.eyeColor);
   }
 
@@ -363,51 +422,70 @@ export function createXolo(params = {}) {
     const add = (geo, bone, group, color = 1, skinFn = null) => pieces.push({ geo, bone, group, color, skinFn });
     const shift = (secs, o) => secs.map((s) => ({ ...s, z: s.z - o[2], y: (s.y || 0) - o[1] }));
     const vol = (secs, fw, fh) => secs.map((q) => (q.w > 0.03 ? { ...q, w: q.w * fw, h: q.h * fh } : q));
-    add(loft(shift(vol(CHEST, 1.08, 1.06), L.chest), 26, 3), chestShape, 0);
-    add(loft(shift(vol(HIP, 1.12, 1.07), L.hips), 26, 3), hipShape, 0);
+    // one continuous torso in body space, skin-blended from chest to hips (no seam at the waist)
+    {
+      const ci = bones.indexOf(chestShape), hi = bones.indexOf(hipShape);
+      const torso = loft(TORSO.map((q) => ({ ...q, y: (q.y || 0) })), 36, 4);
+      add(torso, body, 0, 1, (p) => {
+        const t = smooth((p.z + 0.07) / 0.2);
+        return [ci, hi, 1 - t, t];
+      });
+    }
 
     // neck
     const neckG = loft([
-      { z: -0.05, w: 0.055, h: 0.06 }, { z: 0.0, w: 0.064, h: 0.074 }, { z: 0.1, w: 0.058, h: 0.066 },
-      { z: L.neckLen, w: 0.052, h: 0.058 }, { z: L.neckLen + 0.035, w: 0.03, h: 0.03 },
-    ], 18, 2);
+      { z: -0.06, w: 0.06, h: 0.066 }, { z: -0.01, w: 0.072, h: 0.084, y: -0.006 }, { z: 0.06, w: 0.064, h: 0.074, y: -0.004 },
+      { z: 0.14, w: 0.056, h: 0.064 }, { z: L.neckLen, w: 0.053, h: 0.06, y: 0.004 }, { z: L.neckLen + 0.035, w: 0.032, h: 0.032 },
+    ], 30, 3);
     neckG.rotateX(-(Math.PI / 2 + L.neckTilt));
     add(neckG, neck, 0);
 
     // head
     const hs = (g) => { g.scale(HS, HS, HS); return g; };
-    add(hs(loft(HEAD, 24, 2)), head, 0);
-    add(hs(loft(JAW, 16, 2)), jaw, 0);
+    add(hs(loft(HEAD, 40, 3)), head, 0);
+    add(hs(loft(JAW, 28, 3)), jaw, 0);
     const tongue = ellipsoid(0.023, 0.006, 0.05, 10, 6); tongue.rotateX(0.18); tongue.translate(0, 0.0, -0.17);
     add(hs(tongue), jaw, 1, [1, 0.72, 0.78]);
-    const nose = ellipsoid(0.022, 0.016, 0.017, 10, 8); nose.translate(0, 0.014, -0.272);
+    const nose = ellipsoid(0.024, 0.017, 0.018, 16, 12); nose.translate(0, 0.016, -0.274);
     add(hs(nose), head, 0, 0.35);
+    for (const s of [-1, 1]) {
+      const nos = ellipsoid(0.0062, 0.0042, 0.004, 10, 6); nos.rotateZ(s * 0.5); nos.translate(s * 0.0095, 0.014, -0.2905);
+      add(hs(nos), head, 0, 0.02);
+    }
     // brow ridges for expression
     for (const s of [-1, 1]) {
-      const brow = ellipsoid(0.026, 0.011, 0.02, 10, 6); brow.rotateZ(-s * 0.35); brow.translate(s * 0.045, 0.087, -0.085);
+      const brow = ellipsoid(0.024, 0.008, 0.018, 14, 8); brow.rotateZ(-s * 0.3); brow.translate(s * 0.046, 0.083, -0.088);
       add(hs(brow), head, 0);
-      const eye = new THREE.SphereGeometry(0.021, 20, 16); eye.deleteAttribute('uv');
-      const pd = new THREE.Vector3(s * 0.55, 0.12, -1).normalize(), n = new THREE.Vector3();
+      const pd = new THREE.Vector3(s * 0.6, 0.1, -1).normalize(), n = new THREE.Vector3();
+      const eye = new THREE.SphereGeometry(0.0185, 32, 24); eye.deleteAttribute('uv');
       const ep = eye.attributes.position, ec = new Float32Array(ep.count * 3);
       for (let i = 0; i < ep.count; i++) {
         const d = n.fromBufferAttribute(ep, i).normalize().dot(pd);
-        const m = d > 0.8 ? 0.015 : d > 0.7 ? 0.3 : d > 0.25 ? 1 : 0.8;
-        ec[i * 3] = ec[i * 3 + 1] = ec[i * 3 + 2] = m;
+        const iris = d > 0.83 ? 0.012 : d > 0.79 ? 0.35 : d > 0.5 ? 1 - (d - 0.5) * 0.9 : d > 0.44 ? 0.25 : 0.9;
+        ec[i * 3] = ec[i * 3 + 1] = ec[i * 3 + 2] = iris;
       }
       eye.setAttribute('color', new THREE.BufferAttribute(ec, 3));
-      eye.translate(s * 0.051, 0.06, -0.1);
+      const eq = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), pd);
+      eye.scale(1, 0.82, 1); eye.applyQuaternion(eq);
+      eye.translate(s * 0.05, 0.058, -0.098);
       add(hs(eye), head, 2);
+      // almond eyelid rim so the eye sits in the skull instead of on it
+      const lid = new THREE.TorusGeometry(0.0182, 0.0052, 12, 48); lid.deleteAttribute('uv');
+      lid.scale(1.12, 0.8, 1); lid.rotateZ(-s * 0.18); lid.applyQuaternion(eq);
+      lid.translate(s * 0.05, 0.058, -0.098).translate(pd.x * 0.0085, pd.y * 0.0085, pd.z * 0.0085);
+      add(hs(lid), head, 0, 0.85);
     }
     if (P.tuft) {
-      for (let i = 0; i < 6; i++) {
-        const c = new THREE.ConeGeometry(0.011, 0.05 + (i % 2) * 0.015, 5, 1); c.deleteAttribute('uv');
-        c.translate(0, 0.025, 0); c.rotateX(0.7 + (i % 3) * 0.12); c.rotateZ((i - 2.5) * 0.18);
-        c.translate((i - 2.5) * 0.012, 0.118, -0.015 + (i % 2) * 0.02);
+      for (let i = 0; i < 11; i++) {
+        const u = i / 10 - 0.5;
+        const c = new THREE.ConeGeometry(0.008, 0.045 + (i % 3) * 0.012, 8, 1); c.deleteAttribute('uv');
+        c.translate(0, 0.022, 0); c.rotateX(0.75 + (i % 3) * 0.1); c.rotateZ(u * 0.9);
+        c.translate(u * 0.06, 0.117 - Math.abs(u) * 0.02, -0.02 + (i % 2) * 0.018);
         add(hs(c), head, 0, 2.2);
       }
     }
     // ears
-    const eg = earGeos(0.315 * ES, 0.118 * ES, 0.036 * ES, 0.02 * ES);
+    const eg = earGeos(0.315 * ES, 0.118 * ES, 0.036 * ES, 0.014 * ES);
     for (const e of ears) { add(hs(eg.outer.clone()), e.bone, 0); add(hs(eg.inner.clone()), e.bone, 1); }
 
     // collar garland (neck-local ring around neck base)
@@ -450,9 +528,9 @@ export function createXolo(params = {}) {
       const [L1, L2, L3] = leg.L, J1 = L1, J2 = L1 + L2, J3 = J2 + L3;
       // [distance down the leg, radius, width scale, forward offset]
       const prof = leg.front
-        ? [[0, 0.056, 0.8, 0], [0.07, 0.05, 0.8, 0], [J1 * 0.75, 0.034, 0.88, 0], [J1, 0.028, 0.95, 0],
+        ? [[0, 0.06, 0.8, 0], [0.07, 0.054, 0.8, 0.004], [J1 * 0.75, 0.036, 0.88, 0], [J1, 0.029, 0.95, 0],
            [J1 + L2 * 0.5, 0.024, 1, 0], [J2, 0.02, 1, 0], [J3, 0.0185, 1, 0]]
-        : [[0, 0.078, 0.74, -0.008], [0.06, 0.074, 0.74, -0.01], [J1 * 0.6, 0.052, 0.8, -0.006], [J1, 0.03, 0.92, 0],
+        : [[0, 0.084, 0.74, -0.008], [0.06, 0.08, 0.74, -0.012], [J1 * 0.6, 0.055, 0.8, -0.008], [J1, 0.031, 0.92, 0],
            [J1 + L2 * 0.35, 0.026, 1, 0], [J2, 0.019, 1, 0], [J3, 0.017, 1, 0]];
       const at = (d) => {
         let i = 0; while (i < prof.length - 2 && d > prof[i + 1][0]) i++;
@@ -470,7 +548,7 @@ export function createXolo(params = {}) {
         secs.push({ z: d, w: r * sx, h: r, y: off });
       }
       secs.push({ z: J3 + 0.012, w: 0.008, h: 0.008 });
-      const tube = loft(secs, 16); tube.rotateX(Math.PI / 2);
+      const tube = loft(secs, 24); tube.rotateX(Math.PI / 2);
       const bi = [leg.upper, leg.mid, leg.foot, leg.paw].map((b) => bones.indexOf(b));
       const joints = [[J1, 0.04], [J2, 0.03], [J3, 0.018]];
       add(tube, leg.upper, 0, 1, (p) => {
@@ -482,21 +560,31 @@ export function createXolo(params = {}) {
         }
         return [bi[3], bi[2], 1, 0];
       });
-      const paw = ellipsoid(0.03, 0.023, 0.044, 10, 6); paw.translate(0, 0.022, -0.017);
+      const pw = leg.front ? 1 : 0.94;
+      const paw = ellipsoid(0.026 * pw, 0.021, 0.032, 20, 14); paw.translate(0, 0.023, -0.01);
       add(paw, leg.paw, 0);
+      for (let k = 0; k < 4; k++) {
+        const ox = (k - 1.5) * 0.0142 * pw, side = Math.abs(k - 1.5) > 1;
+        const toe = ellipsoid(0.0098 * pw, 0.0105, 0.0155, 14, 10);
+        toe.translate(ox, 0.011, -0.033 + (side ? 0.006 : 0));
+        add(toe, leg.paw, 0);
+        const nail = new THREE.ConeGeometry(0.0034, 0.013, 8, 1); nail.deleteAttribute('uv');
+        nail.rotateX(-Math.PI / 2 - 0.55); nail.translate(ox, 0.007, -0.05 + (side ? 0.006 : 0));
+        add(nail, leg.paw, 0, 2.4);
+      }
     }
 
     // tail: one smooth tube blended between consecutive bones
     const tLen = L.tailSeg * (L.tailN - 1), tSecs = [];
-    for (let i = 0; i <= 20; i++) {
-      const s = (i / 20) * (tLen + 0.02);
+    for (let i = 0; i <= 32; i++) {
+      const s = (i / 32) * (tLen + 0.02);
       const r = lerp(0.03, 0.007, Math.pow(s / tLen, 0.8));
       tSecs.push({ z: s, w: r, h: r });
     }
     tSecs[0] = { z: -0.03, w: 0.012, h: 0.012 };
     tSecs.push({ z: tLen + 0.03, w: 0.003, h: 0.003 });
     const t0 = bones.indexOf(tail[0]);
-    add(loft(tSecs, 12), tail[0], 0, 1, (p) => {
+    add(loft(tSecs, 20), tail[0], 0, 1, (p) => {
       const f = clamp(p.z / L.tailSeg, 0, L.tailN - 1 - 1e-4), i = Math.floor(f), w = f - i;
       return [t0 + i, t0 + i + 1, 1 - w, w];
     });
@@ -533,6 +621,7 @@ export function createXolo(params = {}) {
     geo.setAttribute('position', new THREE.Float32BufferAttribute(P_, 3));
     geo.setAttribute('normal', new THREE.Float32BufferAttribute(N_, 3));
     geo.setAttribute('color', new THREE.Float32BufferAttribute(C_, 3));
+    geo.setAttribute('rest', new THREE.Float32BufferAttribute(P_, 3));
     geo.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(SI, 4));
     geo.setAttribute('skinWeight', new THREE.Float32BufferAttribute(SW, 4));
     geo.setIndex(P_.length / 3 > 65535 ? new THREE.Uint32BufferAttribute(I_, 1) : new THREE.Uint16BufferAttribute(I_, 1));
@@ -745,7 +834,7 @@ export function createXolo(params = {}) {
     R.head.rotation.x = stab - 0.04 * runB + st.lookPitchS + airPitch * -0.4 + headUp * 0.3 - deadLimp * 0.1;
     R.head.rotation.y = st.lookYawS + sp.yaw.x * 1.3 + Math.sin(t * 3) * 0.25 * dizzy;
     R.head.rotation.z = -sp.lean.x * 0.6 + Math.sin(t * 2.4) * 0.25 * dizzy + st.lookYawS * -0.15;
-    if (jawOpen === undefined) jawOpen = idleB * (0.14 + 0.07 * pant) + runB * (0.2 + 0.06 * Math.sin(ph * 2)) * gnd + airB * 0.05;
+    if (jawOpen === undefined) jawOpen = idleB * (0.025 + 0.025 * pant) + runB * (0.1 + 0.035 * Math.sin(ph * 2)) * gnd + airB * 0.02;
     R.jaw.rotation.x = -jawOpen;
 
     // ---- ears
