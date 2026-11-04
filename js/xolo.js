@@ -291,6 +291,24 @@ const HEAD = [
   { z: -0.281, w: 0.016, h: 0.017, y: -0.003 },
   { z: -0.287, w: 0.005, h: 0.005, y: -0.003 },
 ];
+// half-width of the HEAD loft at (z, y), for placing details on the skull surface
+function headX(z, y) {
+  let k = 0;
+  while (k < HEAD.length - 2 && HEAD[k + 1].z > z) k++;
+  const a = HEAD[k], b = HEAD[k + 1], t = clamp((a.z - z) / (a.z - b.z), 0, 1);
+  const w = a.w + (b.w - a.w) * t, h = a.h + (b.h - a.h) * t, yc = (a.y || 0) + ((b.y || 0) - (a.y || 0)) * t;
+  const q = (y - yc) / h;
+  return w * Math.sqrt(Math.max(0, 1 - q * q));
+}
+// height of the upper-lip edge (lower part of the HEAD loft) at z
+function headLow(z) {
+  let k = 0;
+  while (k < HEAD.length - 2 && HEAD[k + 1].z > z) k++;
+  const a = HEAD[k], b = HEAD[k + 1], t = clamp((a.z - z) / (a.z - b.z), 0, 1);
+  return (a.y || 0) + ((b.y || 0) - (a.y || 0)) * t - 0.8 * (a.h + (b.h - a.h) * t);
+}
+const catchMat = new THREE.MeshBasicMaterial({ color: '#ffffff' });
+
 const JAW = [
   { z: 0.03, w: 0.01, h: 0.01, y: -0.012 },
   { z: 0.01, w: 0.055, h: 0.032, y: -0.014 },
@@ -454,27 +472,42 @@ float xSkin(vec3 p) { return xNoise(p * 95.0) * 0.2 + xNoise(p * 34.0) * 0.45 + 
       add(hs(nos), head, 0, 0.02);
     }
     // brow ridges for expression
+    const catchGeos = [];
     for (const s of [-1, 1]) {
-      const brow = ellipsoid(0.024, 0.008, 0.018, 14, 8); brow.rotateZ(-s * 0.3); brow.translate(s * 0.046, 0.083, -0.088);
+      const brow = ellipsoid(0.024, 0.008, 0.018, 14, 8); brow.rotateZ(-s * 0.22); brow.translate(s * 0.046, 0.087, -0.09);
       add(hs(brow), head, 0);
-      const pd = new THREE.Vector3(s * 0.6, 0.1, -1).normalize(), n = new THREE.Vector3();
-      const eye = new THREE.SphereGeometry(0.0185, 32, 24); eye.deleteAttribute('uv');
+      const pd = new THREE.Vector3(s * 0.28, 0.1, -1).normalize(), n = new THREE.Vector3();
+      const eye = new THREE.SphereGeometry(0.021, 32, 24); eye.deleteAttribute('uv');
       const ep = eye.attributes.position, ec = new Float32Array(ep.count * 3);
       for (let i = 0; i < ep.count; i++) {
         const d = n.fromBufferAttribute(ep, i).normalize().dot(pd);
-        const iris = d > 0.83 ? 0.012 : d > 0.79 ? 0.35 : d > 0.5 ? 1 - (d - 0.5) * 0.9 : d > 0.44 ? 0.25 : 0.9;
+        const iris = d > 0.78 ? 0.012 : d > 0.74 ? 0.3 : d > 0.36 ? 1 - (d - 0.36) * 0.85 : d > 0.3 ? 0.2 : 0.85;
         ec[i * 3] = ec[i * 3 + 1] = ec[i * 3 + 2] = iris;
       }
       eye.setAttribute('color', new THREE.BufferAttribute(ec, 3));
       const eq = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), pd);
-      eye.scale(1, 0.82, 1); eye.applyQuaternion(eq);
-      eye.translate(s * 0.05, 0.058, -0.098);
+      eye.scale(1, 0.95, 1); eye.applyQuaternion(eq);
+      const ec0 = new THREE.Vector3(s * 0.049, 0.058, -0.1);
+      eye.translate(ec0.x, ec0.y, ec0.z);
       add(hs(eye), head, 2);
       // almond eyelid rim so the eye sits in the skull instead of on it
-      const lid = new THREE.TorusGeometry(0.0182, 0.0052, 12, 48); lid.deleteAttribute('uv');
-      lid.scale(1.12, 0.8, 1); lid.rotateZ(-s * 0.18); lid.applyQuaternion(eq);
-      lid.translate(s * 0.05, 0.058, -0.098).translate(pd.x * 0.0085, pd.y * 0.0085, pd.z * 0.0085);
+      const lid = new THREE.TorusGeometry(0.0205, 0.0045, 12, 48); lid.deleteAttribute('uv');
+      lid.scale(1.06, 0.92, 1); lid.rotateZ(-s * 0.08); lid.applyQuaternion(eq);
+      lid.translate(ec0.x, ec0.y, ec0.z).translate(pd.x * 0.0095, pd.y * 0.0095, pd.z * 0.0095);
       add(hs(lid), head, 0, 0.85);
+      // catchlight: separate unlit sparkle so the eyes read alive and friendly
+      const cl = new THREE.SphereGeometry(0.0046, 10, 8); cl.deleteAttribute('uv');
+      const cd = pd.clone().add(new THREE.Vector3(-s * 0.25, 0.7, 0)).normalize().multiplyScalar(0.0208);
+      cl.translate(ec0.x + cd.x, ec0.y + cd.y, ec0.z + cd.z);
+      catchGeos.push(hs(cl));
+      // smile: lip line that curls up at the mouth corner, with a soft cheek above it
+      const pts = [[-0.21, 0], [-0.16, 0], [-0.12, 0.002], [-0.09, 0.012], [-0.072, 0.026], [-0.063, 0.038]]
+        .map(([z, lift]) => {
+          const y = headLow(z) + lift;
+          return new THREE.Vector3(s * (headX(z, y) + 0.001), y, z);
+        });
+      const lip = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 40, 0.0027, 8, false); lip.deleteAttribute('uv');
+      add(hs(lip), head, 1, [0.42, 0.2, 0.25]);
     }
     if (P.tuft) {
       for (let i = 0; i < 11; i++) {
@@ -642,6 +675,7 @@ float xSkin(vec3 p) { return xNoise(p * 95.0) * 0.2 + xNoise(p * 34.0) * 0.45 + 
     sm.add(base);
     sm.bind(new THREE.Skeleton(bones, inverses), new THREE.Matrix4());
     sm.castShadow = castShadow;
+    if (catchGeos.length) { const cm = new THREE.Mesh(mergeGeometries(catchGeos), catchMat); cm.name = 'xolo-catchlights'; head.add(cm); }
     return { mesh: sm, L, bones, base, body, chest, chestShape, hips, hipShape, neck, head, jaw, ears, legs, tail };
   }
 
@@ -843,7 +877,7 @@ float xSkin(vec3 p) { return xNoise(p * 95.0) * 0.2 + xNoise(p * 34.0) * 0.45 + 
     R.head.rotation.x = stab - 0.04 * runB + st.lookPitchS + airPitch * -0.4 + headUp * 0.3 - deadLimp * 0.1;
     R.head.rotation.y = st.lookYawS + sp.yaw.x * 1.3 + Math.sin(t * 3) * 0.25 * dizzy;
     R.head.rotation.z = -sp.lean.x * 0.6 + Math.sin(t * 2.4) * 0.25 * dizzy + st.lookYawS * -0.15;
-    if (jawOpen === undefined) jawOpen = idleB * (0.025 + 0.025 * pant) + runB * (0.1 + 0.035 * Math.sin(ph * 2)) * gnd + airB * 0.02;
+    if (jawOpen === undefined) jawOpen = idleB * (0.06 + 0.03 * pant) + runB * (0.1 + 0.035 * Math.sin(ph * 2)) * gnd + airB * 0.02;
     R.jaw.rotation.x = -jawOpen;
 
     // ---- ears
