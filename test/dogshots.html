@@ -34,6 +34,14 @@ const views = [
   { x: run, p: [2.9, 0.6, -0.1], t: [0, 0.5, -0.1], f: 35 },       // side running
   { x: run, p: [0, 3.4, 6.2], t: [0, 1.1, -6], f: 60, zoom: 4 },   // game camera (4x zoom crop)
 ];
+if (q.get('v') === 'ears') views.splice(0, views.length,
+  { x: idle, p: [0, 1.0, -1.25], t: [0, 0.86, -0.46], f: 26 },     // head front
+  { x: idle, p: [0.7, 1.05, 0.15], t: [0, 0.86, -0.46], f: 26 },   // head rear 3/4
+  { x: idle, p: [0.9, 0.9, -0.5], t: [0, 0.86, -0.46], f: 26 },    // head side
+  { x: run, p: [0, 1.3, 0.6], t: [0, 0.8, -0.4], f: 30 },          // running, from behind
+  { x: run, p: [0.95, 0.95, -0.45], t: [0, 0.82, -0.42], f: 28 },  // running, side
+  { x: run, p: [0, 3.4, 6.2], t: [0, 1.1, -6], f: 60, zoom: 4 },   // game camera
+);
 for (let i = 0; i < 4; i++) world.update(DT, i * DT, new THREE.Vector3(), cam);
 renderer.setScissorTest(true);
 renderer.clear();

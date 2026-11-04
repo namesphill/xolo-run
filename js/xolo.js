@@ -120,10 +120,11 @@ function ellipsoid(rx, ry, rz, ws = 12, hs = 8) {
   return g;
 }
 
-// Large bat ear: cupped shell opening toward -Z, base at origin, extends +Y.
+// Tall pointed bat ear: cupped shell opening toward -Z, base at origin, extends +Y.
 function earGeos(H, W, cup, thick) {
   const NU = 26, NV = 18;
-  const wAt = (u) => W * Math.pow(Math.max(0, Math.sin(Math.PI * (0.16 + 0.84 * u))), 0.6);
+  // pointed leaf: widest just above the root, straight-ish flanks tapering to a sharp tip
+  const wAt = (u) => W * Math.pow(1 - u, 1.05) * (1 + 0.75 * u) * (0.55 + 0.45 * smooth(u / 0.2));
   const front = (u, v) => [
     wAt(u) * v,
     u * H,
@@ -144,7 +145,7 @@ function earGeos(H, W, cup, thick) {
   const fr = grid((u, v) => front(u, v), true);
   const bk = grid((u, v) => {
     const p = front(u, v);
-    p[2] += thick * Math.sqrt(Math.max(0, 1 - v * v)) * (1 - 0.7 * u);
+    p[2] += thick * Math.sqrt(Math.max(0, 1 - v * v)) * (1 - 0.7 * u) * (1 + 1.0 * (1 - smooth(u / 0.3)));
     return p;
   }, false);
   const outer = mergeGeometries([fr, bk]);
@@ -164,7 +165,7 @@ function earGeos(H, W, cup, thick) {
     inner.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
   }
   // thin pink lip wrapping onto the back edge so the ear reads from behind
-  const backAt = (u, v) => { const p = front(u, v); p[2] += thick * Math.sqrt(Math.max(0, 1 - v * v)) * (1 - 0.7 * u) + 0.0025; return p; };
+  const backAt = (u, v) => { const p = front(u, v); p[2] += thick * Math.sqrt(Math.max(0, 1 - v * v)) * (1 - 0.7 * u) * (1 + 1.0 * (1 - smooth(u / 0.3))) + 0.0025; return p; };
   const lips = [-1, 1].map((sd) => grid((u, v) => backAt(0.04 + u * 0.9, sd * (0.84 + 0.15 * (v + 1) / 2)), sd < 0));
   for (const l of lips) l.setAttribute('color', new THREE.Float32BufferAttribute(new Array(l.attributes.position.count * 3).fill(0.88), 3));
   return { outer, inner: mergeGeometries([inner, ...lips]) };
@@ -389,7 +390,7 @@ float xSkin(vec3 p) { return xNoise(p * 95.0) * 0.2 + xNoise(p * 34.0) * 0.45 + 
     const nd = new THREE.Vector3(0, Math.cos(L.neckTilt), -Math.sin(L.neckTilt));
     const head = mk('head', neck, 0, nd.y * L.neckLen, nd.z * L.neckLen, 'YXZ');
     const jaw = mk('jaw', head, 0, -0.02 * HS, -0.04 * HS);
-    const ears = [-1, 1].map((side) => ({ side, bone: mk('ear' + side, head, side * 0.054 * HS, 0.072 * HS, 0.012 * HS, 'YXZ') }));
+    const ears = [-1, 1].map((side) => ({ side, bone: mk('ear' + side, head, side * 0.044 * HS, 0.088 * HS, 0.018 * HS, 'YXZ') }));
 
     const legs = [];
     for (const front of [true, false]) for (const side of [-1, 1]) {
@@ -485,8 +486,16 @@ float xSkin(vec3 p) { return xNoise(p * 95.0) * 0.2 + xNoise(p * 34.0) * 0.45 + 
       }
     }
     // ears
-    const eg = earGeos(0.315 * ES, 0.118 * ES, 0.036 * ES, 0.014 * ES);
-    for (const e of ears) { add(hs(eg.outer.clone()), e.bone, 0); add(hs(eg.inner.clone()), e.bone, 1); }
+    const eg = earGeos(0.28 * ES, 0.074 * ES, 0.03 * ES, 0.017 * ES);
+    for (const k of ['outer', 'inner']) eg[k].translate(0, -0.028 * ES, 0); // root sunk into the skull
+    const hi = bones.indexOf(head);
+    for (const e of ears) {
+      const ei = bones.indexOf(e.bone);
+      // root follows the skull so the ear grows out of the head when it swivels
+      const rootSkin = (p) => { const w = 1 - smooth((p.y + 0.01 * HS) / (0.08 * HS)); return [ei, hi, 1 - w, w]; };
+      add(hs(eg.outer.clone()), e.bone, 0, 1, rootSkin);
+      add(hs(eg.inner.clone()), e.bone, 1, 1, rootSkin);
+    }
 
     // collar garland (neck-local ring around neck base)
     if (P.collar) {
