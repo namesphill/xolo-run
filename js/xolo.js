@@ -282,11 +282,11 @@ const HEAD = [
   { z: 0.04, w: 0.078, h: 0.075, y: 0.058 },
   { z: -0.005, w: 0.09, h: 0.08, y: 0.052 },
   { z: -0.055, w: 0.086, h: 0.074, y: 0.044, k: 0.1 },
-  { z: -0.095, w: 0.072, h: 0.062, y: 0.032, k: 0.15 },
-  { z: -0.13, w: 0.058, h: 0.051, y: 0.02, k: 0.12 },
-  { z: -0.17, w: 0.05, h: 0.046, y: 0.01, k: 0.08 },
-  { z: -0.21, w: 0.043, h: 0.041, y: 0.003 },
-  { z: -0.245, w: 0.036, h: 0.035, y: -0.002 },
+  { z: -0.095, w: 0.072, h: 0.068, y: 0.026, k: 0.1 },
+  { z: -0.13, w: 0.059, h: 0.058, y: 0.013, k: 0.07 },
+  { z: -0.17, w: 0.051, h: 0.052, y: 0.004, k: 0.04 },
+  { z: -0.21, w: 0.044, h: 0.046, y: -0.002 },
+  { z: -0.245, w: 0.036, h: 0.038, y: -0.005 },
   { z: -0.268, w: 0.028, h: 0.028, y: -0.003 },
   { z: -0.281, w: 0.016, h: 0.017, y: -0.003 },
   { z: -0.287, w: 0.005, h: 0.005, y: -0.003 },
@@ -305,18 +305,21 @@ function headLow(z) {
   let k = 0;
   while (k < HEAD.length - 2 && HEAD[k + 1].z > z) k++;
   const a = HEAD[k], b = HEAD[k + 1], t = clamp((a.z - z) / (a.z - b.z), 0, 1);
-  return (a.y || 0) + ((b.y || 0) - (a.y || 0)) * t - 0.8 * (a.h + (b.h - a.h) * t);
+  return (a.y || 0) + ((b.y || 0) - (a.y || 0)) * t - 0.72 * (a.h + (b.h - a.h) * t);
 }
 const catchMat = new THREE.MeshBasicMaterial({ color: '#ffffff' });
 
+// lower jaw: wide at the back so it flows out of the cheeks, tucked under the upper lip
 const JAW = [
-  { z: 0.03, w: 0.01, h: 0.01, y: -0.012 },
-  { z: 0.01, w: 0.055, h: 0.032, y: -0.014 },
-  { z: -0.06, w: 0.05, h: 0.028, y: -0.018 },
-  { z: -0.13, w: 0.04, h: 0.022, y: -0.02 },
-  { z: -0.19, w: 0.031, h: 0.017, y: -0.018 },
-  { z: -0.225, w: 0.02, h: 0.012, y: -0.016 },
-  { z: -0.236, w: 0.006, h: 0.006, y: -0.015 },
+  { z: 0.05, w: 0.012, h: 0.012, y: 0.0 },
+  { z: 0.035, w: 0.056, h: 0.04, y: 0.008 },
+  { z: -0.01, w: 0.06, h: 0.036, y: 0.0 },
+  { z: -0.06, w: 0.054, h: 0.03, y: -0.006 },
+  { z: -0.12, w: 0.043, h: 0.022, y: -0.008 },
+  { z: -0.18, w: 0.033, h: 0.017, y: -0.01 },
+  { z: -0.215, w: 0.025, h: 0.014, y: -0.011 },
+  { z: -0.232, w: 0.012, h: 0.008, y: -0.012 },
+  { z: -0.237, w: 0.004, h: 0.004, y: -0.012 },
 ];
 
 // ---------------------------------------------------------------- main
@@ -462,7 +465,14 @@ float xSkin(vec3 p) { return xNoise(p * 95.0) * 0.2 + xNoise(p * 34.0) * 0.45 + 
     // head
     const hs = (g) => { g.scale(HS, HS, HS); return g; };
     add(hs(loft(HEAD, 40, 3)), head, 0);
-    add(hs(loft(JAW, 28, 3)), jaw, 0);
+    {
+      // back of the jaw stays with the skull so opening the mouth hinges instead of leaving a gap
+      const ji = bones.indexOf(jaw), hi0 = bones.indexOf(head);
+      add(hs(loft(JAW, 32, 3)), jaw, 0, 1, (p) => {
+        const w = smooth((-p.z / HS + 0.01) / 0.09);
+        return [ji, hi0, w, 1 - w];
+      });
+    }
     const tongue = ellipsoid(0.023, 0.006, 0.05, 10, 6); tongue.rotateX(0.18); tongue.translate(0, 0.0, -0.17);
     add(hs(tongue), jaw, 1, [1, 0.72, 0.78]);
     const nose = ellipsoid(0.024, 0.017, 0.018, 16, 12); nose.translate(0, 0.016, -0.274);
@@ -504,7 +514,7 @@ float xSkin(vec3 p) { return xNoise(p * 95.0) * 0.2 + xNoise(p * 34.0) * 0.45 + 
       const pts = [[-0.21, 0], [-0.16, 0], [-0.12, 0.002], [-0.09, 0.012], [-0.072, 0.026], [-0.063, 0.038]]
         .map(([z, lift]) => {
           const y = headLow(z) + lift;
-          return new THREE.Vector3(s * (headX(z, y) + 0.001), y, z);
+          return new THREE.Vector3(s * (headX(z, y) + 0.0025), y, z);
         });
       const lip = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 40, 0.0027, 8, false); lip.deleteAttribute('uv');
       add(hs(lip), head, 1, [0.42, 0.2, 0.25]);
@@ -877,7 +887,7 @@ float xSkin(vec3 p) { return xNoise(p * 95.0) * 0.2 + xNoise(p * 34.0) * 0.45 + 
     R.head.rotation.x = stab - 0.04 * runB + st.lookPitchS + airPitch * -0.4 + headUp * 0.3 - deadLimp * 0.1;
     R.head.rotation.y = st.lookYawS + sp.yaw.x * 1.3 + Math.sin(t * 3) * 0.25 * dizzy;
     R.head.rotation.z = -sp.lean.x * 0.6 + Math.sin(t * 2.4) * 0.25 * dizzy + st.lookYawS * -0.15;
-    if (jawOpen === undefined) jawOpen = idleB * (0.06 + 0.03 * pant) + runB * (0.1 + 0.035 * Math.sin(ph * 2)) * gnd + airB * 0.02;
+    if (jawOpen === undefined) jawOpen = idleB * (0.045 + 0.025 * pant) + runB * (0.085 + 0.03 * Math.sin(ph * 2)) * gnd + airB * 0.02;
     R.jaw.rotation.x = -jawOpen;
 
     // ---- ears
