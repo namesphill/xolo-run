@@ -218,7 +218,7 @@ function starGeo() {
 
 // ---------------------------------------------------------------- layout
 function layout(P) {
-  const LL = P.legLength, HS = P.headScale * 1.1;
+  const LL = P.legLength, HS = P.headScale * 1.15;
   return {
     LL, HS,
     bodyY: 0.5 + (LL - 1) * 0.43,
@@ -276,13 +276,19 @@ const TORSO = [
   { z: 0.42, w: 0.048, h: 0.048, y: 0.082 },
   { z: 0.432, w: 0.012, h: 0.012, y: 0.082 },
 ];
+// muzzle length factor ahead of the eyes (<1 = shorter, puppyish snout)
+const MUZ = 0.7, MUZ0 = -0.095;
+// skull width factor (rounder, broader cranium); eyes and brows follow it
+const SKW = 1.07;
+const skw = (z) => 1 + (SKW - 1) * smooth((z + 0.16) / 0.08);
+const mz = (z) => (z < MUZ0 ? MUZ0 + (z - MUZ0) * MUZ : z);
 const HEAD = [
   { z: 0.085, w: 0.012, h: 0.012, y: 0.062 },
   { z: 0.07, w: 0.05, h: 0.052, y: 0.062 },
   { z: 0.04, w: 0.078, h: 0.075, y: 0.058 },
   { z: -0.005, w: 0.09, h: 0.08, y: 0.052 },
-  { z: -0.055, w: 0.086, h: 0.074, y: 0.044, k: 0.1 },
-  { z: -0.095, w: 0.072, h: 0.068, y: 0.026, k: 0.1 },
+  { z: -0.055, w: 0.086, h: 0.078, y: 0.047, k: 0.1 },
+  { z: -0.095, w: 0.072, h: 0.071, y: 0.029, k: 0.1 },
   { z: -0.13, w: 0.059, h: 0.058, y: 0.013, k: 0.07 },
   { z: -0.17, w: 0.051, h: 0.052, y: 0.004, k: 0.04 },
   { z: -0.21, w: 0.044, h: 0.046, y: -0.002 },
@@ -290,7 +296,7 @@ const HEAD = [
   { z: -0.268, w: 0.028, h: 0.028, y: -0.003 },
   { z: -0.281, w: 0.016, h: 0.017, y: -0.003 },
   { z: -0.287, w: 0.005, h: 0.005, y: -0.003 },
-];
+].map((q) => ({ ...q, z: mz(q.z), w: q.w * skw(q.z) }));
 // half-width of the HEAD loft at (z, y), for placing details on the skull surface
 function headX(z, y) {
   let k = 0;
@@ -320,7 +326,7 @@ const JAW = [
   { z: -0.215, w: 0.025, h: 0.014, y: -0.011 },
   { z: -0.232, w: 0.012, h: 0.008, y: -0.012 },
   { z: -0.237, w: 0.004, h: 0.004, y: -0.012 },
-];
+].map((q) => ({ ...q, z: mz(q.z - 0.04) + 0.04 }));
 
 // ---------------------------------------------------------------- main
 export function createXolo(params = {}) {
@@ -473,47 +479,63 @@ float xSkin(vec3 p) { return xNoise(p * 95.0) * 0.2 + xNoise(p * 34.0) * 0.45 + 
         return [ji, hi0, w, 1 - w];
       });
     }
-    const tongue = ellipsoid(0.023, 0.006, 0.05, 10, 6); tongue.rotateX(0.18); tongue.translate(0, 0.0, -0.17);
+    const tongue = ellipsoid(0.023, 0.006, 0.05, 10, 6); tongue.rotateX(0.18); tongue.translate(0, 0.0, mz(-0.21) + 0.04);
     add(hs(tongue), jaw, 1, [1, 0.72, 0.78]);
-    const nose = ellipsoid(0.024, 0.017, 0.018, 16, 12); nose.translate(0, 0.016, -0.274);
+    const nose = ellipsoid(0.026, 0.019, 0.019, 16, 12); nose.translate(0, 0.016, mz(-0.274));
     add(hs(nose), head, 0, 0.35);
     for (const s of [-1, 1]) {
-      const nos = ellipsoid(0.0062, 0.0042, 0.004, 10, 6); nos.rotateZ(s * 0.5); nos.translate(s * 0.0095, 0.014, -0.2905);
+      const nos = ellipsoid(0.0062, 0.0042, 0.004, 10, 6); nos.rotateZ(s * 0.5); nos.translate(s * 0.0095, 0.014, mz(-0.2905));
       add(hs(nos), head, 0, 0.02);
     }
     // brow ridges for expression
     const catchGeos = [];
     for (const s of [-1, 1]) {
-      const brow = ellipsoid(0.024, 0.008, 0.018, 14, 8); brow.rotateZ(-s * 0.22); brow.translate(s * 0.046, 0.087, -0.09);
+      const ER = 0.0245;
+      const brow = ellipsoid(0.02, 0.0052, 0.015, 14, 8); brow.rotateZ(-s * 0.3); brow.translate(s * 0.045 * SKW, 0.0895, -0.088);
       add(hs(brow), head, 0);
       const pd = new THREE.Vector3(s * 0.28, 0.1, -1).normalize(), n = new THREE.Vector3();
-      const eye = new THREE.SphereGeometry(0.021, 32, 24); eye.deleteAttribute('uv');
+      const eye = new THREE.SphereGeometry(ER, 32, 24); eye.deleteAttribute('uv');
       const ep = eye.attributes.position, ec = new Float32Array(ep.count * 3);
       for (let i = 0; i < ep.count; i++) {
         const d = n.fromBufferAttribute(ep, i).normalize().dot(pd);
-        const iris = d > 0.78 ? 0.012 : d > 0.74 ? 0.3 : d > 0.36 ? 1 - (d - 0.36) * 0.85 : d > 0.3 ? 0.2 : 0.85;
+        const iris = d > 0.74 ? 0.012 : d > 0.7 ? 0.3 : d > 0.36 ? 1 - (d - 0.36) * 0.85 : d > 0.3 ? 0.2 : 0.85;
         ec[i * 3] = ec[i * 3 + 1] = ec[i * 3 + 2] = iris;
       }
       eye.setAttribute('color', new THREE.BufferAttribute(ec, 3));
       const eq = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), pd);
       eye.scale(1, 0.95, 1); eye.applyQuaternion(eq);
-      const ec0 = new THREE.Vector3(s * 0.049, 0.058, -0.1);
+      const ec0 = new THREE.Vector3(s * 0.049 * SKW, 0.058, -0.1);
       eye.translate(ec0.x, ec0.y, ec0.z);
       add(hs(eye), head, 2);
       // almond eyelid rim so the eye sits in the skull instead of on it
-      const lid = new THREE.TorusGeometry(0.0205, 0.0045, 12, 48); lid.deleteAttribute('uv');
+      // upper lid only (tapered arc): reads as a soft lid instead of a goggle ring
+      const LA = 1.3 * Math.PI, LR = ER * 0.976;
+      const lid = new THREE.TorusGeometry(LR, 0.0036, 10, 40, LA); lid.deleteAttribute('uv');
+      {
+        const lp = lid.attributes.position;
+        for (let i = 0; i < lp.count; i++) {
+          const x = lp.getX(i), y = lp.getY(i), u = Math.atan2(y, x), cx = Math.cos(u) * LR, cy = Math.sin(u) * LR;
+          const uu = ((u % TAU) + TAU) % TAU, f = Math.sqrt(smooth(Math.min(uu, LA - uu) / 0.9));
+          lp.setXYZ(i, cx + (x - cx) * f, cy + (y - cy) * f, lp.getZ(i) * f);
+        }
+        lid.rotateZ(Math.PI / 2 - LA / 2); lid.computeVertexNormals();
+      }
       lid.scale(1.06, 0.92, 1); lid.rotateZ(-s * 0.08); lid.applyQuaternion(eq);
-      lid.translate(ec0.x, ec0.y, ec0.z).translate(pd.x * 0.0095, pd.y * 0.0095, pd.z * 0.0095);
+      lid.translate(ec0.x, ec0.y, ec0.z).translate(pd.x * ER * 0.45, pd.y * ER * 0.45, pd.z * ER * 0.45);
       add(hs(lid), head, 0, 0.85);
       // catchlight: separate unlit sparkle so the eyes read alive and friendly
-      const cl = new THREE.SphereGeometry(0.0046, 10, 8); cl.deleteAttribute('uv');
-      const cd = pd.clone().add(new THREE.Vector3(-s * 0.25, 0.7, 0)).normalize().multiplyScalar(0.0208);
+      const cl = new THREE.SphereGeometry(0.0054, 10, 8); cl.deleteAttribute('uv');
+      const cd = pd.clone().add(new THREE.Vector3(-s * 0.25, 0.7, 0)).normalize().multiplyScalar(ER * 0.99);
       cl.translate(ec0.x + cd.x, ec0.y + cd.y, ec0.z + cd.z);
       catchGeos.push(hs(cl));
+      const cl2 = new THREE.SphereGeometry(0.0024, 8, 6); cl2.deleteAttribute('uv');
+      const cd2 = pd.clone().add(new THREE.Vector3(s * 0.3, -0.45, 0)).normalize().multiplyScalar(ER * 0.99);
+      cl2.translate(ec0.x + cd2.x, ec0.y + cd2.y, ec0.z + cd2.z);
+      catchGeos.push(hs(cl2));
       // smile: lip line that curls up at the mouth corner, with a soft cheek above it
-      const pts = [[-0.21, 0], [-0.16, 0], [-0.12, 0.002], [-0.09, 0.012], [-0.072, 0.026], [-0.063, 0.038]]
-        .map(([z, lift]) => {
-          const y = headLow(z) + lift;
+      const pts = [[-0.21, 0], [-0.16, 0], [-0.12, 0.0025], [-0.093, 0.013], [-0.075, 0.028], [-0.065, 0.041], [-0.061, 0.047]]
+        .map(([z0, lift]) => {
+          const z = mz(z0), y = headLow(z) + lift;
           return new THREE.Vector3(s * (headX(z, y) + 0.0025), y, z);
         });
       const lip = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 40, 0.0027, 8, false); lip.deleteAttribute('uv');
@@ -529,7 +551,7 @@ float xSkin(vec3 p) { return xNoise(p * 95.0) * 0.2 + xNoise(p * 34.0) * 0.45 + 
       }
     }
     // ears
-    const eg = earGeos(0.28 * ES, 0.074 * ES, 0.03 * ES, 0.017 * ES);
+    const eg = earGeos(0.268 * ES, 0.071 * ES, 0.029 * ES, 0.0163 * ES);
     for (const k of ['outer', 'inner']) eg[k].translate(0, -0.028 * ES, 0); // root sunk into the skull
     const hi = bones.indexOf(head);
     for (const e of ears) {
@@ -886,7 +908,7 @@ float xSkin(vec3 p) { return xNoise(p * 95.0) * 0.2 + xNoise(p * 34.0) * 0.45 + 
     const stab = -(gPitch - flex) * 0.9 - R.neck.rotation.x * 0.7;
     R.head.rotation.x = stab - 0.04 * runB + st.lookPitchS + airPitch * -0.4 + headUp * 0.3 - deadLimp * 0.1;
     R.head.rotation.y = st.lookYawS + sp.yaw.x * 1.3 + Math.sin(t * 3) * 0.25 * dizzy;
-    R.head.rotation.z = -sp.lean.x * 0.6 + Math.sin(t * 2.4) * 0.25 * dizzy + st.lookYawS * -0.15;
+    R.head.rotation.z = -sp.lean.x * 0.6 + Math.sin(t * 2.4) * 0.25 * dizzy + st.lookYawS * -0.15 + idleB * (0.1 + 0.04 * Math.sin(t * 0.6));
     if (jawOpen === undefined) jawOpen = idleB * (0.045 + 0.025 * pant) + runB * (0.085 + 0.03 * Math.sin(ph * 2)) * gnd + airB * 0.02;
     R.jaw.rotation.x = -jawOpen;
 
