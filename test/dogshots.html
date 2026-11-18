@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import { createWorld } from '../js/world.js';
 const q = new URLSearchParams(location.search);
-const mod = await import(q.get('m') === 'base' ? './xolo_base.js' : '../js/xolo.js');
+const mod = await import((q.get('m') === 'base' ? './xolo_base.js' : '../js/xolo.js') + '?_=' + Date.now());
 const TW = 640, TH = 480, COLS = 3, ROWS = 2;
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(1); renderer.setSize(TW * COLS, TH * ROWS);
@@ -49,6 +49,14 @@ if (q.get('v') === 'face') views.splice(0, views.length,
   { x: idle, p: [1.6, 1.05, -2.0], t: [0, 0.5, -0.1], f: 35 },     // full front 3/4
   { x: run, p: [0.6, 0.95, -1.3], t: [0, 0.78, -0.5], f: 26 },     // running face
   { x: run, p: [0, 3.4, 6.2], t: [0, 1.1, -6], f: 60, zoom: 4 },   // game camera
+);
+if (q.get('v') === 'mouth') views.splice(0, views.length,
+  { x: idle, p: [0.62, 0.74, -0.72], t: [0, 0.72, -0.72], f: 20 },    // mouth side
+  { x: idle, p: [0.42, 0.66, -1.15], t: [0, 0.72, -0.72], f: 22 }, // mouth low 3/4
+  { x: idle, p: [0, 0.68, -1.25], t: [0, 0.73, -0.72], f: 20 },    // mouth front
+  { x: idle, p: [0.45, 0.92, -1.1], t: [0, 0.82, -0.5], f: 22 },   // face 3/4
+  { x: run, p: [0.62, 0.72, -0.75], t: [0, 0.69, -0.72], f: 22 },   // running mouth side
+  { x: run, p: [0.6, 0.95, -1.3], t: [0, 0.78, -0.5], f: 26 },     // running face
 );
 for (let i = 0; i < 4; i++) world.update(DT, i * DT, new THREE.Vector3(), cam);
 renderer.setScissorTest(true);

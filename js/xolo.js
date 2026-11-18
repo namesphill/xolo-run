@@ -320,13 +320,13 @@ const catchMat = new THREE.MeshBasicMaterial({ color: '#ffffff' });
 const JAW = [
   { z: 0.05, w: 0.012, h: 0.012, y: 0.0 },
   { z: 0.035, w: 0.056, h: 0.04, y: 0.008 },
-  { z: -0.01, w: 0.06, h: 0.036, y: 0.0 },
-  { z: -0.06, w: 0.054, h: 0.03, y: -0.006 },
-  { z: -0.12, w: 0.043, h: 0.022, y: -0.008 },
-  { z: -0.18, w: 0.033, h: 0.017, y: -0.01 },
-  { z: -0.215, w: 0.025, h: 0.014, y: -0.011 },
-  { z: -0.232, w: 0.012, h: 0.008, y: -0.012 },
-  { z: -0.237, w: 0.004, h: 0.004, y: -0.012 },
+  { z: -0.01, w: 0.06, h: 0.034, y: 0.002 },
+  { z: -0.06, w: 0.052, h: 0.026, y: -0.001 },
+  { z: -0.12, w: 0.041, h: 0.019, y: -0.002 },
+  { z: -0.17, w: 0.033, h: 0.015, y: 0.0 },
+  { z: -0.2, w: 0.026, h: 0.013, y: 0.003 },
+  { z: -0.218, w: 0.015, h: 0.008, y: 0.006 },
+  { z: -0.224, w: 0.005, h: 0.004, y: 0.007 },
 ];
 
 // Lip: a thin strip lying on the HEAD loft surface along its lower edge (the mouth seam),
@@ -508,6 +508,21 @@ float xSkin(vec3 p) { return xNoise(p * 95.0) * 0.2 + xNoise(p * 34.0) * 0.45 + 
         const w = smooth((-p.z / HS + 0.01) / 0.09);
         return [ji, hi0, w, 1 - w];
       });
+    }
+    {
+      // mouth interior: rose gums on the jaw and a palate under the muzzle, so the seam reads as a mouth, not a gap
+      const ji = bones.indexOf(jaw), hi0 = bones.indexOf(head);
+      const gum = loft(JAW.map((q) => ({ ...q, w: q.w * 0.8, h: q.h * 0.45, y: q.y + q.h * 0.6 })), 24, 2);
+      add(hs(gum), jaw, 1, [0.55, 0.2, 0.26], (p) => {
+        const w = smooth((-p.z / HS + 0.01) / 0.09);
+        return [ji, hi0, w, 1 - w];
+      });
+      // only peeks below the skull mid-muzzle (seen through the open mouth); tucked inside at the tip and throat
+      const pal = loft(subSecs(HEAD, 2).filter((q) => q.z <= -0.07 && q.z >= -0.24).map((q) => {
+        const m = smooth((-0.07 - q.z) / 0.05) - 1.6 * smooth((-0.19 - q.z) / 0.04);
+        return { z: q.z, w: q.w * 0.45, h: 0.01, y: (q.y || 0) - q.h + 0.01 - 0.0012 * m };
+      }), 24, 1);
+      add(hs(pal), head, 1, [0.42, 0.14, 0.2]);
     }
     const tongue = ellipsoid(0.023, 0.006, 0.05, 10, 6); tongue.rotateX(0.18); tongue.translate(0, 0.0, -0.17);
     add(hs(tongue), jaw, 1, [1, 0.72, 0.78]);
