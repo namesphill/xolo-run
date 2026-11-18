@@ -48,7 +48,7 @@ class Spring {
 
 // ---------------------------------------------------------------- geometry helpers
 // Loft of elliptical sections along +Z. sec: {z, w, h, x?, y?, k? (keel: narrow bottom)}
-function loft(secs, seg = 14, sub = 1) {
+function subSecs(secs, sub) {
   secs = secs.slice().sort((a, b) => a.z - b.z);
   if (sub > 1) {
     const cr = (p0, p1, p2, p3, t) => 0.5 * (2 * p1 + (p2 - p0) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + (3 * p1 - p0 - 3 * p2 + p3) * t * t * t);
@@ -68,12 +68,19 @@ function loft(secs, seg = 14, sub = 1) {
     out.push(secs[secs.length - 1]);
     secs = out;
   }
+  return secs;
+}
+function loftPoint(s, a) {
+  const ca = Math.cos(a), sa = Math.sin(a), kx = 1 - (s.k || 0) * Math.max(0, -sa);
+  return new THREE.Vector3((s.x || 0) + s.w * ca * kx, (s.y || 0) + s.h * sa, s.z);
+}
+function loft(secs, seg = 14, sub = 1) {
+  secs = subSecs(secs, sub);
   const pos = [], idx = [], n = secs.length;
   for (const s of secs) {
     for (let j = 0; j < seg; j++) {
-      const a = (j / seg) * TAU, ca = Math.cos(a), sa = Math.sin(a);
-      const kx = 1 - (s.k || 0) * Math.max(0, -sa);
-      pos.push((s.x || 0) + s.w * ca * kx, (s.y || 0) + s.h * sa, s.z);
+      const p = loftPoint(s, (j / seg) * TAU);
+      pos.push(p.x, p.y, p.z);
     }
   }
   for (let i = 0; i < n - 1; i++) for (let j = 0; j < seg; j++) {
@@ -328,6 +335,35 @@ const JAW = [
   { z: -0.237, w: 0.004, h: 0.004, y: -0.012 },
 ].map((q) => ({ ...q, z: mz(q.z - 0.04) + 0.04 }));
 
+// Lip: a thin strip lying on the HEAD loft surface along its lower edge (the mouth seam),
+// curling up at the corner. Built from the same sections as the skull, so it can't float off it.
+function lipBand(side) {
+  const z0 = mz(-0.236), z1 = -0.066, rows = 5, eps = 0.0009;
+  const S = subSecs(HEAD, 3).filter((q) => q.z >= z0 && q.z <= z1);
+  const pos = [], idx = [];
+  for (const q of S) {
+    const u = (q.z - z0) / (z1 - z0);
+    const curl = smooth((u - 0.72) / 0.28);
+    const mid = -0.84 + 0.34 * curl;
+    const half = 0.17 * Math.min(smooth(u / 0.12), 1 - 0.8 * smooth((u - 0.86) / 0.14));
+    for (let r = 0; r < rows; r++) {
+      let a = mid + half * ((2 * r) / (rows - 1) - 1);
+      if (side < 0) a = Math.PI - a;
+      const p = loftPoint(q, a), n = new THREE.Vector3(Math.cos(a) * q.h, Math.sin(a) * q.w, 0).normalize();
+      pos.push(p.x + n.x * eps, p.y + n.y * eps, p.z);
+    }
+  }
+  for (let i = 0; i < S.length - 1; i++) for (let r = 0; r < rows - 1; r++) {
+    const a = i * rows + r, b = a + 1, c = a + rows, d = c + 1;
+    if (side > 0) idx.push(a, b, c, b, d, c); else idx.push(a, c, b, b, c, d);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
 // ---------------------------------------------------------------- main
 export function createXolo(params = {}) {
   const P = Object.assign({}, XOLO_DEFAULTS, params);
@@ -532,14 +568,8 @@ float xSkin(vec3 p) { return xNoise(p * 95.0) * 0.2 + xNoise(p * 34.0) * 0.45 + 
       const cd2 = pd.clone().add(new THREE.Vector3(s * 0.3, -0.45, 0)).normalize().multiplyScalar(ER * 0.99);
       cl2.translate(ec0.x + cd2.x, ec0.y + cd2.y, ec0.z + cd2.z);
       catchGeos.push(hs(cl2));
-      // smile: lip line that curls up at the mouth corner, with a soft cheek above it
-      const pts = [[-0.21, 0], [-0.16, 0], [-0.12, 0.0025], [-0.093, 0.013], [-0.075, 0.028], [-0.065, 0.041], [-0.061, 0.047]]
-        .map(([z0, lift]) => {
-          const z = mz(z0), y = headLow(z) + lift;
-          return new THREE.Vector3(s * (headX(z, y) + 0.0025), y, z);
-        });
-      const lip = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 40, 0.0027, 8, false); lip.deleteAttribute('uv');
-      add(hs(lip), head, 1, [0.42, 0.2, 0.25]);
+      // smile: lip along the mouth seam, curling up at the corner
+      add(hs(lipBand(s)), head, 1, [0.5, 0.26, 0.31]);
     }
     if (P.tuft) {
       for (let i = 0; i < 11; i++) {
