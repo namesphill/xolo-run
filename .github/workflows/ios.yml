@@ -1,0 +1,29 @@
+name: iOS build
+
+on:
+  push:
+    branches: [main]
+    paths: ['index.html', 'styles.css', 'js/**', 'fonts/**', 'ios/**', 'capacitor.config.json', 'package*.json', '.github/workflows/ios.yml']
+  workflow_dispatch:
+
+jobs:
+  simulator:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run ios:sync
+      - name: Build for iOS Simulator (unsigned)
+        run: |
+          xcodebuild -project ios/App/App.xcodeproj -scheme App \
+            -configuration Debug -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: XoloRun-simulator-app
+          path: build/Build/Products/Debug-iphonesimulator/App.app

@@ -39,3 +39,15 @@ SEEDS=$(seq -s, 1 40) GOAL=9000 node test/fairness.mjs
 - `js/xolo.js`: the xolo character.
 - `js/models.js`: props and scenery.
 - `js/audio.js`: music and sound effects.
+
+## iOS app (Capacitor)
+
+The same static game is wrapped as a native iOS app with [Capacitor](https://capacitorjs.com/) (`ios/`, Swift Package Manager, no CocoaPods).
+
+```sh
+npm install
+npm run ios:sync   # copies the game into www/ and syncs it into ios/App
+npm run ios:open   # opens the Xcode project (macOS + Xcode 16 required)
+```
+
+In Xcode pick your Team under Signing & Capabilities, then run on a simulator or device. Bundle id: `io.github.namesphill.xolorun`. CI (`.github/workflows/ios.yml`) builds an unsigned simulator app on every push to `main`.

@@ -1,0 +1,10 @@
+{
+  "appId": "io.github.namesphill.xolorun",
+  "appName": "Xolo Run",
+  "webDir": "www",
+  "ios": {
+    "contentInset": "never",
+    "scrollEnabled": false,
+    "backgroundColor": "#2b1640"
+  }
+}
