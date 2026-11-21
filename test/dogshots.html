@@ -4,7 +4,7 @@
 <script type="importmap">{ "imports": { "three": "../js/vendor/three.module.js", "three/addons/": "../js/vendor/" } }</script>
 </head><body>
 <script type="module">
-// Fixed-camera contact sheet of the xolo for review (6 views). ?m=base renders test/xolo_base.js if present (copy an old js/xolo.js there to compare).
+// Fixed-camera contact sheet of the xolo for review (6 views). ?dog=../assets/x.glb renders a .glb dog. ?m=base renders test/xolo_base.js if present (copy an old js/xolo.js there to compare).
 import * as THREE from 'three';
 import { createWorld } from '../js/world.js';
 const q = new URLSearchParams(location.search);
@@ -19,7 +19,10 @@ renderer.autoClear = false;
 document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 const world = createWorld(renderer, scene, { quality: 'high', waterY: 0 });
-const idle = mod.createXolo(), run = mod.createXolo();
+// ?dog=<url to .glb> renders an artist-made dog through js/xolo-glb.js instead
+const dog = q.get('dog');
+const { loadXoloGLB } = dog ? await import('../js/xolo-glb.js') : {};
+const idle = dog ? await loadXoloGLB(dog) : mod.createXolo(), run = dog ? await loadXoloGLB(dog) : mod.createXolo();
 for (const x of [idle, run]) { x.setShadow(true); scene.add(x.root); }
 const DT = 1 / 60;
 for (let i = 0; i < 90; i++) idle.update(DT, { mode: 'idle', speed: 0, grounded: true, vy: 0, lateral: 0 });

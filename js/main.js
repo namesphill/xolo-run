@@ -1,9 +1,10 @@
 import * as THREE from 'three';
-import { speedAt, laneX, WATER_Y } from './config.js';
+import { speedAt, laneX, WATER_Y, XOLO_GLB } from './config.js';
 import { newPlayer, stepPlayer } from './physics.js';
 import { setMaxAnisotropy } from './textures.js';
 import { createWorld } from './world.js';
 import { createXolo } from './xolo.js';
+import { loadXoloGLB } from './xolo-glb.js';
 import { AudioFX } from './audio.js';
 import { Track } from './track.js';
 import { preloadModelFonts } from './models.js';
@@ -45,7 +46,14 @@ setMaxAnisotropy(Math.min(8, renderer.capabilities.getMaxAnisotropy()));
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 230);
 const world = createWorld(renderer, scene, { quality });
-const xolo = createXolo({ envMapIntensity: 0.65 });
+// ?dog=<url> or XOLO_GLB in config.js swaps in an artist-made .glb; ?dog=procedural forces the code-built dog
+const dogUrl = new URLSearchParams(location.search).get('dog') ?? XOLO_GLB;
+let xolo = null;
+if (dogUrl && dogUrl !== 'procedural') {
+  try { xolo = await loadXoloGLB(dogUrl, { envMapIntensity: 0.65 }); }
+  catch (e) { console.warn('Could not load xolo .glb, using the procedural dog:', e); }
+}
+if (!xolo) xolo = createXolo({ envMapIntensity: 0.65 });
 xolo.setShadow(quality === 'high');
 const XOLO_SCALE = 1.2;
 let stepT = 0, lastFootfall = -9;

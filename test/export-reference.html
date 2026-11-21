@@ -1,0 +1,124 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>xolo reference export</title>
+<script type="importmap">{ "imports": { "three": "../js/vendor/three.module.js", "three/addons/": "../js/vendor/" } }</script>
+</head><body>
+<script type="module">
+// Bakes the procedural dog (js/xolo.js) and its animations into a reference .glb for artists:
+// same skeleton, proportions, scale, facing and clip names that js/xolo-glb.js expects.
+// Open in a browser, then save window.__glb (base64) as assets/xolo_reference.glb.
+import * as THREE from 'three';
+import { GLTFExporter } from 'three/addons/GLTFExporter.js';
+import { jumpParams } from '../js/config.js';
+const { createXolo } = await import('../js/xolo.js?_=' + Date.now());
+
+const FPS = 30, SUB = 4, DT = 1 / (FPS * SUB), SPEED = 12;
+const RUN = { mode: 'run', speed: SPEED, grounded: true, vy: 0, lateral: 0 };
+const IDLE = { mode: 'idle', speed: 0, grounded: true, vy: 0, lateral: 0 };
+Math.random = (() => { let s = 7; return () => ((s = (s * 16807) % 2147483647) / 2147483647); })();
+
+function makeDog() {
+  const x = createXolo();
+  x.feet = [];
+  x.onFootfall = (p, foot, info) => { if (!info) x.feet.push(foot); };
+  return x;
+}
+const sample = (x) => x.mesh.skeleton.bones.map((b) => [b.position.toArray(), b.quaternion.toArray(), b.scale.toArray()]);
+const advance = (x, s, sec) => { for (let i = 0, n = Math.round(sec / DT); i < n; i++) x.update(DT, s); };
+
+// record `sec` seconds; drive(x, t) may change state per substep and returns the update state
+function record(x, sec, drive) {
+  const frames = [sample(x)];
+  let t = 0;
+  for (let f = 1; f <= Math.round(sec * FPS); f++) for (let k = 0; k < SUB; k++) { t += DT; x.update(DT, drive(x, t)); if (k === SUB - 1) frames.push(sample(x)); }
+  return frames;
+}
+function toClip(name, frames, bones) {
+  const times = frames.map((_, i) => i / FPS), tracks = [];
+  bones.forEach((b, j) => {
+    tracks.push(new THREE.VectorKeyframeTrack(b.name + '.position', times, frames.flatMap((f) => f[j][0])));
+    tracks.push(new THREE.QuaternionKeyframeTrack(b.name + '.quaternion', times, frames.flatMap((f) => f[j][1])));
+    tracks.push(new THREE.VectorKeyframeTrack(b.name + '.scale', times, frames.flatMap((f) => f[j][2])));
+  });
+  return new THREE.AnimationClip(name, -1, tracks).optimize();
+}
+// overlay clip: frame0 of the reference plus (event run - plain run), so makeClipAdditive() yields just the event's motion
+function overlay(ev, ref) {
+  const q0 = new THREE.Quaternion(), qr = new THREE.Quaternion(), ql = new THREE.Quaternion();
+  return ev.map((f, i) => f.map(([p, q, s], j) => {
+    const [p0, q0a, s0] = ref[0][j], [pr, qra, sr] = ref[i][j];
+    q0.fromArray(q0a); qr.fromArray(qra).invert(); ql.fromArray(q);
+    return [p.map((v, k) => p0[k] + v - pr[k]), q0.clone().multiply(qr).multiply(ql).toArray(), s.map((v, k) => s0[k] + v - sr[k])];
+  }));
+}
+
+const main = makeDog(), bones = main.mesh.skeleton.bones;
+const clips = [];
+
+// idle
+main.reset(); advance(main, 2, IDLE);
+clips.push(toClip('idle', record(main, 3, () => IDLE), bones));
+
+// run: one stride, start/end on the HL footfall so it loops seamlessly
+main.reset(); advance(main, 3, RUN);
+main.feet = [];
+let n = 0; while (!main.feet.includes('HL')) { main.update(DT, RUN); n++; }
+main.feet = []; let steps = 0, firstHL = -1, fall = {};
+const probe = makeDog(); probe.reset(); advance(probe, 3, RUN); probe.feet = []; while (!probe.feet.includes('HL')) probe.update(DT, RUN);
+probe.feet = []; let pf = [];
+probe.onFootfall = (p, foot, info) => { if (!info) pf.push([foot, steps]); };
+do { probe.update(DT, RUN); steps++; } while (!pf.some(([f, s]) => f === 'HL' && s > 1));
+const period = steps * DT;
+for (const [f, s] of pf) if (!(f in fall)) fall[f] = +((s % steps) / steps).toFixed(3);
+fall.HL = 0;
+const runFrames = []; runFrames.push(sample(main));
+for (let i = 1; i <= steps; i++) { main.update(DT, RUN); if (i % SUB === 0 || i === steps) runFrames.push(sample(main)); }
+const runClip = toClip('run', runFrames.map((f, i) => f), bones);
+// resample times to the exact period
+runClip.tracks.forEach((tr) => { const sc = period / tr.times[tr.times.length - 1]; for (let i = 0; i < tr.times.length; i++) tr.times[i] *= sc; });
+runClip.duration = period; runClip.tracks.forEach((t) => t.validate());
+clips.push(runClip);
+
+// jump: full airtime at base speed (rise and fall)
+{
+  const x = makeDog(); x.reset(); advance(x, 3, RUN);
+  const jp = jumpParams(SPEED); let vy = jp.vy, y = 0;
+  x.onJump();
+  const fr = record(x, jp.T, () => { vy -= jp.g * DT; y += vy * DT; return { ...RUN, grounded: false, vy }; });
+  clips.push(toClip('jump', fr, bones));
+}
+// overlays recorded against an identical dog that keeps running
+const ovr = (name, sec, ev) => {
+  const a = makeDog(), b = makeDog();
+  for (const x of [a, b]) { x.reset(); advance(x, 3, RUN); }
+  ev(a);
+  const fa = record(a, sec, () => RUN), fb = record(b, sec, () => RUN);
+  clips.push(toClip(name, overlay(fa, fb), bones));
+};
+ovr('land', 0.6, (x) => x.onLand(0.8));
+ovr('lane_left', 0.6, (x) => x.onLane(-1));
+ovr('lane_right', 0.6, (x) => x.onLane(1));
+ovr('stumble', 0.9, (x) => x.onStumble(1));
+for (const cause of ['crash', 'splash']) {
+  const x = makeDog(); x.reset(); advance(x, 3, RUN);
+  x.onDeath(cause);
+  clips.push(toClip('death_' + cause, record(x, 1.3, () => ({ ...RUN, mode: 'dead' })), bones));
+}
+
+// rest pose for export + metadata read by js/xolo-glb.js
+main.reset(); main.update(1 / 60, IDLE);
+main.root.updateMatrixWorld(true);
+const box = new THREE.Box3().setFromObject(main.root, true), size = box.getSize(new THREE.Vector3());
+main.root.userData = { xolo_run_speed: SPEED, xolo_footfalls: fall };
+let tris = 0;
+main.root.traverse((o) => { if (o.isMesh && o.geometry.index) tris += o.geometry.index.count / 3; });
+const glb = await new GLTFExporter().parseAsync(main.root, { binary: true, animations: clips });
+let bin = ''; const u8 = new Uint8Array(glb);
+for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+window.__glb = btoa(bin);
+window.__stats = {
+  bytes: u8.length, tris, bones: bones.map((b) => b.name), period: +period.toFixed(3), footfalls: fall,
+  size: size.toArray().map((v) => +v.toFixed(3)), min: box.min.toArray().map((v) => +v.toFixed(3)),
+  clips: clips.map((c) => [c.name, +c.duration.toFixed(3)]),
+};
+window.__done = true;
+</script></body></html>
