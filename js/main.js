@@ -5,6 +5,7 @@ import { setMaxAnisotropy } from './textures.js';
 import { createWorld } from './world.js';
 import { createXolo } from './xolo.js';
 import { AudioFX } from './audio.js';
+import { haptic, haptics, setHaptics, tilt, setTilt, ensureTiltPermission, calibrateTilt, initTilt } from './device.js';
 import { Track } from './track.js';
 import { preloadModelFonts } from './models.js';
 
@@ -94,12 +95,13 @@ function show(el, on) { el.classList.toggle('hidden', !on); }
 function startRun() {
   audio.unlock(); audio.sfx('start');
   resetRun();
+  calibrateTilt();
   state = 'play';
   show(ui.start, false); show(ui.over, false); show(ui.pause, false); show(ui.hud, true);
   audio.startMusic();
   if (auto) setAuto(true);
   else if (firstRun) {
-    ui.hint.textContent = isTouch ? 'Swipe ← → to switch lanes · swipe ↑ to jump' : '← → / A D to switch lanes · Space / ↑ to jump';
+    ui.hint.textContent = tilt.on ? 'Tilt the phone ← → to switch lanes · flick it to jump' : isTouch ? 'Swipe ← → to switch lanes · swipe ↑ to jump' : '← → / A D to switch lanes · Space / ↑ to jump';
     show(ui.hint, true); ui.hint.classList.remove('fade');
     later(() => ui.hint.classList.add('fade'), 3800);
     later(() => show(ui.hint, false), 4600);
@@ -112,6 +114,7 @@ function pauseGame() {
 }
 function resumeGame() {
   if (state !== 'paused') return;
+  calibrateTilt();
   state = 'play'; show(ui.pause, false); audio.resumeAll(); last = CAPTURE ? vnow : performance.now();
 }
 function toMenu() {
@@ -124,6 +127,7 @@ function die(ev) {
   state = 'dying'; deathT = 0; deathCause = ev.cause;
   xolo.onDeath(ev.cause);
   audio.sfx(ev.cause === 'splash' ? 'splash' : 'crash');
+  if (!auto) haptic('crash');
   audio.stopMusic();
   if (ev.cause === 'splash') {
     world.burst(new THREE.Vector3(player.x, 0.05, -player.s), { kind: 'splash', count: 50 });
@@ -139,7 +143,7 @@ function gameOver() {
   state = 'over';
   const sc = score();
   const isNew = sc > best;
-  if (isNew) { best = sc; localStorage.setItem(BEST_KEY, String(best)); audio.sfx('newbest'); } else audio.sfx('gameover');
+  if (isNew) { best = sc; localStorage.setItem(BEST_KEY, String(best)); audio.sfx('newbest'); if (!auto) haptic('newbest'); } else audio.sfx('gameover');
   ui.oDist.textContent = `${Math.floor(player.s).toLocaleString()} m`;
   ui.oSkulls.textContent = skulls.toLocaleString();
   ui.oScore.textContent = sc.toLocaleString();
@@ -226,7 +230,16 @@ addEventListener('touchmove', (e) => {
 addEventListener('touchend', () => { touch = null; }, { passive: true });
 canvas.addEventListener('pointerdown', () => { if (state === 'menu') return; });
 
-$('btn-play').addEventListener('click', () => { setAuto(false); startRun(); });
+$('btn-play').addEventListener('click', () => { setAuto(false); ensureTiltPermission(); startRun(); });
+initTilt((dir) => { if (state === 'play' && !auto) press(dir); }, () => { if (state === 'play' && !auto) press('jump'); });
+const tiltBtn = $('btn-tilt'), hapticsBtn = $('btn-haptics');
+const syncToggles = () => {
+  tiltBtn.classList.toggle('is-on', tilt.on); tiltBtn.querySelector('b').textContent = tilt.on ? 'ON' : 'OFF';
+  hapticsBtn.classList.toggle('is-on', haptics.on); hapticsBtn.querySelector('b').textContent = haptics.on ? 'ON' : 'OFF';
+};
+show(tiltBtn, tilt.supported); show(hapticsBtn, haptics.supported); syncToggles();
+tiltBtn.addEventListener('click', async () => { await setTilt(!tilt.on); syncToggles(); });
+hapticsBtn.addEventListener('click', () => { setHaptics(!haptics.on); syncToggles(); haptic('land'); });
 $('btn-auto').addEventListener('click', () => { setAuto(true); startRun(); });
 $('btn-auto-hud').addEventListener('click', (e) => { e.currentTarget.blur(); setAuto(!auto); });
 $('btn-restart').addEventListener('click', startRun);
@@ -291,15 +304,16 @@ function simStep() {
   const evs = stepPlayer(player, input, DT, track.sections);
   input.left = input.right = input.jump = 0;
   for (const ev of evs) {
-    if (ev.type === 'lane') { xolo.onLane(ev.dir); audio.sfx('lane', { dir: ev.dir }); }
-    else if (ev.type === 'jump') { xolo.onJump(); audio.sfx('jump'); }
+    if (ev.type === 'lane') { xolo.onLane(ev.dir); audio.sfx('lane', { dir: ev.dir }); if (!auto) haptic('lane'); }
+    else if (ev.type === 'jump') { xolo.onJump(); audio.sfx('jump'); if (!auto) haptic('jump'); }
     else if (ev.type === 'land') {
       const st = Math.min(1, Math.abs(ev.vy) / 14);
       xolo.onLand(st); audio.sfx('land', { strength: st });
+      if (!auto && st > 0.3) haptic('land');
       if (ev.on === 'land') world.splash?.(new THREE.Vector3(player.x, 0, -player.s), 0.4 + st);
       world.burst(new THREE.Vector3(player.x, player.y + 0.05, -player.s), { kind: ev.on === 'land' ? 'splash' : 'dust', count: 6 + Math.round(st * 10), colors: ev.on === 'land' ? [0xdff8ff, 0x9fe3e0, 0xffffff] : [0xffd27a, 0xffffff] });
       shake = Math.max(shake, st * 0.12);
-    } else if (ev.type === 'stumble') { xolo.onStumble(ev.dir); audio.sfx('stumble'); shake = 0.3; }
+    } else if (ev.type === 'stumble') { xolo.onStumble(ev.dir); audio.sfx('stumble'); shake = 0.3; if (!auto) haptic('stumble'); }
     else if (ev.type === 'dead') { die(ev); return; }
   }
   const got = track.collect(player, DT);
@@ -308,6 +322,7 @@ function simStep() {
     combo = comboT > 0 ? combo + 1 : 0; comboT = 0.55;
     skulls++;
     audio.sfx('collect', { combo });
+    if (!auto) haptic('collect');
     world.burst(pos, { kind: 'sparkle', count: 10, colors: [0xffffff, 0xff9a1f, 0xe8177d, 0x12b5b0, 0xffe14d] });
   }
   if (got.length) {

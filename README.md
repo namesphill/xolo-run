@@ -11,7 +11,7 @@ A 3D endless runner through the canals of Xochimilco, built with Three.js. You p
   - sugar skulls, ahuejote willows, reeds, lilies, papel picado and flower arches
 - A Van Gogh–style swirly blue sky and jade canal water with splashes, ripples and whirlpools.
 - Procedurally generated tracks. A beam-search test (`test/fairness.mjs`) checks that every seed has a reachable route.
-- Keyboard controls (← → / A D, Space / ↑) and touch swipes. Pause, game over, instant restart, and a best score saved in the browser.
+- Keyboard controls (← → / A D, Space / ↑) touch swipes, and optional tilt steering on phones (tip left/right to switch lanes, flick to jump). Haptics on phones (native in the iOS app). Pause, game over, instant restart, and a best score saved in the browser.
 - Synthesized music and sound effects using the Web Audio API, with a mute toggle.
 - **DEMO (AUTOPILOT)** mode: the dog plays itself and restarts after each game over. Press **T** or tap the **A** button to take over.
 - `viewer.html` is a model viewer with orbit and zoom, an animation picker, collision boxes and live parameters.
