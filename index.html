@@ -5,7 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <meta name="theme-color" content="#2b1640" />
 <meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Xolo Run" />
 <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="icon-180.png" />
+<link rel="manifest" href="manifest.webmanifest" />
 <title>Xolo Run — Xochimilco</title>
 <link rel="preload" href="fonts/lilita.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="stylesheet" href="styles.css" />
@@ -44,6 +49,10 @@
       </div>
       <button class="big-btn" id="btn-play">PLAY<small>¡Vámonos!</small></button>
       <button class="auto-btn" id="btn-auto">DEMO (AUTOPILOT)</button>
+      <div class="toggle-row">
+        <button class="toggle-btn hidden" id="btn-tilt">TILT <b>OFF</b></button>
+        <button class="toggle-btn hidden" id="btn-haptics">HAPTICS <b>ON</b></button>
+      </div>
       <div class="controls-grid">
         <div class="ctl only-desktop"><span class="keys"><kbd>←</kbd><kbd>→</kbd> or <kbd>A</kbd><kbd>D</kbd></span><span>Switch lane</span></div>
         <div class="ctl only-desktop"><span class="keys"><kbd class="wide">Space</kbd> or <kbd>↑</kbd></span><span>Jump</span></div>
