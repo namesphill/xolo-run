@@ -28,7 +28,7 @@
       report((e.message || 'load error') + (e.filename ? ' @ ' + e.filename + ':' + e.lineno : e.target && (e.target.src || e.target.href) ? ' @ ' + (e.target.src || e.target.href) : ''));
     }, true);
     addEventListener('unhandledrejection', function (e) {
-      var r = e.reason; report('promise: ' + (r && (r.stack || r.message) || r));
+      var r = e.reason; report('promise: ' + (r && ((r.message || '') + ' ' + (r.stack || '')) || r));
     });
     setTimeout(function () {
       if (!window.__xoloReady) report('still loading after 15s (' + navigator.userAgent + ')');
