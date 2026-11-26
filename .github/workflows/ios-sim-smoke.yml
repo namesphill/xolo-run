@@ -30,9 +30,11 @@ jobs:
           UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys;d=json.load(sys.stdin)['devices'];print([x['udid'] for k,v in d.items() if 'iOS' in k for x in v if x['name'].startswith('iPhone')][-1])")
           xcrun simctl boot "$UDID"; xcrun simctl bootstatus "$UDID" -b
           xcrun simctl install "$UDID" build/Build/Products/Debug-iphonesimulator/App.app
-          (xcrun simctl launch --console-pty "$UDID" io.github.namesphill.xolorun > out/console.txt 2>&1 &)
-          for t in 10 30 60; do sleep $([ $t = 10 ] && echo 10 || echo 20); [ $t = 60 ] && sleep 10; xcrun simctl io "$UDID" screenshot out/shot-${t}s.png; done
-          xcrun simctl spawn "$UDID" log show --last 3m --style compact --predicate 'process == "App" OR process CONTAINS "WebContent" OR process CONTAINS "GPU"' > out/syslog.txt 2>&1 || true
+          nohup xcrun simctl launch --console --terminate-running-process "$UDID" io.github.namesphill.xolorun > out/console.txt 2>&1 &
+          sleep 10; xcrun simctl io "$UDID" screenshot out/shot-10s.png
+          sleep 20; xcrun simctl io "$UDID" screenshot out/shot-30s.png
+          sleep 30; xcrun simctl io "$UDID" screenshot out/shot-60s.png
+          xcrun simctl spawn "$UDID" log show --last 3m --style compact --predicate 'process == "App" OR process CONTAINS "WebKit" OR process CONTAINS "WebContent"' > out/syslog.txt 2>&1 || true
           echo "----- console -----"; cat out/console.txt | tail -80
           echo "----- syslog (filtered) -----"; grep -iE "error|exception|fail|denied|crash|jetsam|terminat" out/syslog.txt | tail -60
       - uses: actions/upload-artifact@v4

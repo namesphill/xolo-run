@@ -14,6 +14,27 @@
 <title>Xolo Run — Xochimilco</title>
 <link rel="preload" href="fonts/lilita.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="stylesheet" href="styles.css" />
+<script>
+  (function () {
+    var errs = [];
+    function report(msg) {
+      errs.push(String(msg));
+      try { console.error('[xolo-boot] ' + msg); } catch (e) {}
+      var el = document.getElementById('boot-err');
+      if (el) el.textContent = errs.join('\n');
+    }
+    window.__xoloBootError = report;
+    addEventListener('error', function (e) {
+      report((e.message || 'load error') + (e.filename ? ' @ ' + e.filename + ':' + e.lineno : e.target && (e.target.src || e.target.href) ? ' @ ' + (e.target.src || e.target.href) : ''));
+    }, true);
+    addEventListener('unhandledrejection', function (e) {
+      var r = e.reason; report('promise: ' + (r && (r.stack || r.message) || r));
+    });
+    setTimeout(function () {
+      if (!window.__xoloReady) report('still loading after 15s (' + navigator.userAgent + ')');
+    }, 15000);
+  })();
+</script>
 <script type="importmap">
 { "imports": { "three": "./js/vendor/three.module.js", "three/addons/": "./js/vendor/" } }
 </script>
@@ -94,7 +115,7 @@
     </div>
   </div>
 
-  <div id="loading" class="screen"><div class="loader"></div></div>
+  <div id="loading" class="screen"><div class="loader"></div><pre id="boot-err"></pre></div>
   <div id="fallback" class="screen hidden"><div class="card"><h2>WebGL unavailable</h2><p class="muted">Xolo Run needs a browser with WebGL enabled.</p></div></div>
 </div>
 <script type="module" src="js/main.js"></script>
