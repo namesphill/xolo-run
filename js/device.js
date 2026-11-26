@@ -1,6 +1,11 @@
 // Phone extras: haptics (native through Capacitor, Vibration API elsewhere) and tilt steering.
 const cap = globalThis.Capacitor;
-const Haptics = cap?.isNativePlatform?.() && cap.isPluginAvailable?.('Haptics') ? cap.registerPlugin('Haptics') : null;
+let Haptics = null;
+try {
+  if (cap?.isNativePlatform?.() && cap.isPluginAvailable?.('Haptics')) Haptics = cap.Plugins?.Haptics ?? cap.registerPlugin('Haptics');
+} catch (e) {
+  console.warn('Haptics unavailable:', e);
+}
 const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 
 export const haptics = { supported: !!Haptics || 'vibrate' in navigator, on: localStorage.getItem('xolo-haptics') !== '0' };

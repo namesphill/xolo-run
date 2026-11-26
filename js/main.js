@@ -401,6 +401,7 @@ function frame(now) {
 resetRun();
 updateCamera(1);
 if (!CAPTURE) requestAnimationFrame((t) => { last = t; frame(t); }); else last = 0;
+window.__xoloReady = true;
 setTimeout(() => { ui.loading.classList.add('fade'); setTimeout(() => show(ui.loading, false), 600); }, 150);
 
 // debug/testing hooks

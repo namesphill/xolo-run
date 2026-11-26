@@ -64,6 +64,7 @@ kbd.wide { min-width: 64px; }
 .screen.dim { background: radial-gradient(ellipse at center, rgba(43,22,64,.55), rgba(20,8,30,.82)); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
 #screen-start { background: linear-gradient(180deg, rgba(43,22,64,.0) 0%, rgba(43,22,64,.0) 45%, rgba(30,12,45,.78) 100%); align-items: flex-end; padding-bottom: calc(28px + var(--safe-b)); }
 #loading { background: var(--morado); z-index: 50; transition: opacity .5s; }
+#boot-err { position: absolute; left: 12px; right: 12px; bottom: 24px; margin: 0; color: #ffd7a8; font: 11px/1.4 ui-monospace, monospace; white-space: pre-wrap; word-break: break-word; max-height: 45%; overflow: auto; }
 #loading.fade { opacity: 0; pointer-events: none; }
 .loader { width: 54px; height: 54px; border-radius: 50%; border: 6px solid rgba(255,154,31,.25); border-top-color: var(--marigold); animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
