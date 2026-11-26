@@ -1,8 +1,8 @@
 name: iOS simulator smoke test
 
 on:
-  push:
-    branches: ['devin/*ios-sim-smoke*']
+  pull_request:
+    paths: ['index.html', 'js/**', 'ios/**', 'package*.json', 'capacitor.config.json', 'scripts/**', '.github/workflows/ios-sim-smoke.yml']
   workflow_dispatch:
 
 jobs:
