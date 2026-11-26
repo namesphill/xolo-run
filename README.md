@@ -36,7 +36,8 @@ SEEDS=$(seq -s, 1 40) GOAL=9000 node test/fairness.mjs
 - `js/config.js`, `js/planner.js` and `js/physics.js`: pure logic (no browser APIs), so they can be tested in Node.
 - `js/track.js`: builds the track geometry from the planner's sections.
 - `js/world.js`: sky, water, lighting and particles.
-- `js/xolo.js`: the xolo character.
+- `js/xolo.js`: the xolo character, built in code.
+- `js/xolo-glb.js`: loads an artist-made xolo `.glb` with the same API (`?dog=<url>` or `XOLO_GLB` in `js/config.js`). Spec in [`docs/ARTIST_BRIEF.md`](docs/ARTIST_BRIEF.md); `assets/xolo_reference.glb` is the current dog exported by `test/export-reference.html`.
 - `js/models.js`: props and scenery.
 - `js/audio.js`: music and sound effects.
 

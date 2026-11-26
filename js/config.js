@@ -10,6 +10,9 @@ export const JUMP_H = 1.9;
 
 export const PLAYER = { halfW: 0.3, back: 0.45, front: 0.5, height: 0.95 };
 
+// Path to an artist-made dog (.glb, see docs/ARTIST_BRIEF.md); null uses the procedural dog in xolo.js
+export const XOLO_GLB = null;
+
 export const BASE_SPEED = 12;
 export const MAX_SPEED_GAIN = 16;
 export function speedAt(s) {

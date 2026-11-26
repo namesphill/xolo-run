@@ -4,4 +4,7 @@ const out = 'www';
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out);
 for (const f of ['index.html', 'styles.css', 'favicon.svg', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png', 'js', 'fonts']) cpSync(f, `${out}/${f}`, { recursive: true });
+// artist-made dog (if any); the reference rig is for artists only
+cpSync('assets', `${out}/assets`, { recursive: true, filter: (f) => !f.endsWith('xolo_reference.glb') });
+
 console.log('www/ ready');

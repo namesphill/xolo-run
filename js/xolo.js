@@ -452,10 +452,11 @@ float xSkin(vec3 p) { return xNoise(p * 95.0) * 0.2 + xNoise(p * 34.0) * 0.45 + 
     const legs = [];
     for (const front of [true, false]) for (const side of [-1, 1]) {
       const parent = front ? chest : hips, j = front ? L.shoulder : L.hip, Ls = front ? L.front : L.hind;
-      const upper = mk((front ? 'F' : 'H') + side + 'u', parent, side * j[0], j[1], j[2], 'ZXY');
-      const mid = mk('m', upper, 0, -Ls[0], 0);
-      const foot = mk('f', mid, 0, -Ls[1], 0);
-      const paw = mk('p', foot, 0, -Ls[2], 0);
+      const ln = (front ? 'F' : 'H') + side;
+      const upper = mk(ln + 'u', parent, side * j[0], j[1], j[2], 'ZXY');
+      const mid = mk(ln + 'm', upper, 0, -Ls[0], 0);
+      const foot = mk(ln + 'f', mid, 0, -Ls[1], 0);
+      const paw = mk(ln + 'p', foot, 0, -Ls[2], 0);
       const po = front ? L.chest : L.hips;
       legs.push({
         front, side, parent, upper, mid, foot, paw, L: Ls, kneeFwd: !front,
